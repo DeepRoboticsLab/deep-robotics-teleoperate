@@ -1,0 +1,9 @@
+build/
+build-*/
+install/
+log/
+.idea/
+__pycache__/
+.venv/
+.agents/
+.codex/
