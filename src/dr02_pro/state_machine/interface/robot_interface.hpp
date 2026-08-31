@@ -11,15 +11,11 @@
 
 #include <iostream>
 #include <string>
-#include <vector>
 
 #include <unistd.h>
 
-#include <atomic>
-#include <cstring>
 #include <functional>
 
-#include "utils.hpp"
 #include "time.hpp"
 #include "types.h"
 #include "drdds/msg/joints.hpp"
@@ -29,20 +25,19 @@
 namespace deep_robotics::dr02_pro {
 class RobotInterface {
 protected:
+    static constexpr uint16_t kMotorControlWord = 4;
+
     // Timing information
-    double ri_ts_;   // Robot interface timestamp (seconds)
+    double ri_ts_{0.0};  // Robot interface timestamp (seconds)
 
     // Joint data
     VecXf joint_pos_;           // Joint positions (rad)
     VecXf joint_vel_;           // Joint velocities (rad/s)
     VecXf joint_tau_;           // Joint torques (Nm)
     VecXf motor_temperature_;   // Motor temperatures (°C)
-    VecXf driver_temperature_;  // Driver temperatures (°C)
 
     // Status monitoring
-    std::vector<uint16_t> driver_status_;  // Joint driver status words
-    std::vector<uint16_t> joint_data_id_;  // Joint data packet IDs
-    uint64_t joint_cmd_frame_id_{0};        // Joint command frame counter
+    uint64_t joint_cmd_frame_id_{0};  // Joint command frame counter
 
     rclcpp::Publisher<drdds::msg::JointsCmd>::SharedPtr joint_cmd_pub_;
     rclcpp::Subscription<drdds::msg::Joints>::SharedPtr joint_data_sub_;
@@ -58,21 +53,14 @@ public:
      */
     RobotInterface(const std::string& robot_name, int dof_num, int leg_dof_num, int arm_dof_num, int waist_dof_num,
                    int neck_dof_num, rclcpp::Node::SharedPtr node)
-        : robot_name_(robot_name),
-          dof_num_(dof_num),
-          leg_dof_num_(leg_dof_num),
-          arm_dof_num_(arm_dof_num),
-          waist_dof_num_(waist_dof_num),
-          neck_dof_num_(neck_dof_num),
-          joint_cmd_(Eigen::Matrix<float, Eigen::Dynamic, 5>::Zero(dof_num_, 5)),
-          start_flag_(true),
+        : dof_num_(dof_num),
           node_(node) {
         std::cout << robot_name << std::endl;
         std::cout << "Total DOF: " << dof_num_ << std::endl;
-        std::cout << "  Leg DOF: " << leg_dof_num_ << std::endl;
-        std::cout << "  Arm DOF: " << arm_dof_num_ << std::endl;
-        std::cout << "Waist DOF: " << waist_dof_num_ << std::endl;
-        std::cout << " Neck DOF: " << neck_dof_num_ << std::endl;
+        std::cout << "  Leg DOF: " << leg_dof_num << std::endl;
+        std::cout << "  Arm DOF: " << arm_dof_num << std::endl;
+        std::cout << "Waist DOF: " << waist_dof_num << std::endl;
+        std::cout << " Neck DOF: " << neck_dof_num << std::endl;
 
         if (!node_) {
             std::cerr << "RobotInterface node is null" << std::endl;
@@ -82,19 +70,11 @@ public:
         joint_vel_ = VecXf::Zero(dof_num_);
         joint_tau_ = VecXf::Zero(dof_num_);
         motor_temperature_ = VecXf::Zero(dof_num_);
-        driver_temperature_ = VecXf::Zero(dof_num_);
-
-        driver_status_.resize(dof_num_);
-        joint_data_id_.resize(dof_num_);
     }
 
-    virtual ~RobotInterface() {
-    };
+    virtual ~RobotInterface() = default;
 
-    std::string robot_name_;
-    const int dof_num_, leg_dof_num_, arm_dof_num_, waist_dof_num_, neck_dof_num_;
-    Eigen::Matrix<float, Eigen::Dynamic, 5> joint_cmd_;
-    std::atomic<bool> start_flag_;
+    const int dof_num_;
     rclcpp::Node::SharedPtr node_;
 
     /**
@@ -102,15 +82,13 @@ public:
      */
     virtual void Start() {
         joint_cmd_pub_ = node_->create_publisher<drdds::msg::JointsCmd>("/JOINTS_CMD", 10);
+        const auto joint_data_qos =
+            rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();
         joint_data_sub_ = node_->create_subscription<drdds::msg::Joints>(
-            "/JOINTS_DATA", 10, std::bind(&RobotInterface::HandleJointData, this, std::placeholders::_1));
+            "/JOINTS_DATA", joint_data_qos,
+            std::bind(&RobotInterface::HandleJointData, this, std::placeholders::_1));
         WaitDataUpdate();
     }
-
-    /**
-     * @brief Stop the robot interface.
-     */
-    virtual void Stop() {}
 
     /**
      * @brief Get the robot interface timestamp.
@@ -141,7 +119,6 @@ public:
      * @param input Joint command matrix with columns for kp, position, kd, velocity, and feedforward torque.
      */
     virtual void SetJointCommand(Eigen::Matrix<float, Eigen::Dynamic, 5> input) {
-        joint_cmd_ = input;
         auto msg = drdds::msg::JointsCmd();
         const rclcpp::Time stamp = node_->now();
         const int64_t nanoseconds = stamp.nanoseconds();
@@ -152,7 +129,7 @@ public:
 
         for (int i = 0; i < dof_num_; ++i) {
             msg.data[i].data_id = static_cast<uint16_t>(i);
-            msg.data[i].control_word = kIndexMotorControl;
+            msg.data[i].control_word = kMotorControlWord;
             msg.data[i].position = input(i, 1);
             msg.data[i].velocity = input(i, 3);
             msg.data[i].torque = input(i, 4);
@@ -164,45 +141,10 @@ public:
     }
 
     /**
-     * @brief Get the last joint command matrix.
-     * @return Joint command matrix.
-     */
-    virtual MatXf GetJointCommand() { return joint_cmd_; }
-
-    /**
-     * @brief Get contact force data.
-     * @return Contact force vector.
-     */
-    virtual VecXf GetContactForce() { return VecXf::Zero(4); }
-
-    /**
      * @brief Get current motor temperatures.
      * @return Motor temperature vector.
      */
     virtual VecXf GetMotorTemperature() { return motor_temperature_; }
-
-    /**
-     * @brief Get current driver temperatures.
-     * @return Driver temperature vector.
-     */
-    virtual VecXf GetDriverTemperature() { return driver_temperature_; }
-
-    /**
-     * @brief Get current driver status words.
-     * @return Driver status word vector.
-     */
-    virtual std::vector<uint16_t> GetDriverStatusWord() { return driver_status_; }
-
-    /**
-     * @brief Get current joint data IDs.
-     * @return Joint data ID vector.
-     */
-    virtual std::vector<uint16_t> GetJointDataID() { return joint_data_id_; }
-
-    /**
-     * @brief Refresh robot data before running state logic.
-     */
-    virtual void RefreshRobotData() {}
 
     /**
      * @brief Wait until the first joint-state frame is received.
@@ -235,9 +177,6 @@ public:
             joint_vel_(i) = msg->data[i].velocity;
             joint_tau_(i) = msg->data[i].torque;
             motor_temperature_(i) = float(msg->data[i].motion_temp);
-            driver_temperature_(i) = float(msg->data[i].driver_temp);
-            driver_status_[i] = msg->data[i].status_word;
-            joint_data_id_[i] = uint16_t(run_cnt_);
         }
 
         ri_ts_ = GetTimestampMs() / 1000.;

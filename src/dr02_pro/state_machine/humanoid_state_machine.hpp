@@ -12,10 +12,14 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <thread>
+#include <utility>
 
 #include "time.hpp"
 #include "dr2_pro_interface.hpp"
+#include "end_effector_factory.hpp"
+#include "recording_manager.hpp"
 
 #include "state_base.h"
 #include "zeropos_state.hpp"
@@ -35,7 +39,6 @@ private:
     std::shared_ptr<StateBase> down_controller_;
 
 public:
-    int run_cnt_ = 0;
     LoopTimer loop_timer_{};
     std::shared_ptr<MotionStateStore> motion_state_store_;
 
@@ -43,10 +46,13 @@ public:
     std::shared_ptr<RobotInterface> ri_ptr_;
     std::shared_ptr<ControlParameters> cp_ptr_;
     std::shared_ptr<SafeController> sc_ptr_;
+    std::shared_ptr<RecordingManager> recording_manager_;
+    std::shared_ptr<EndEffector> end_effector_;
     rclcpp::Node::SharedPtr node_;
 
     std::shared_ptr<StateBase> current_controller_;
-    StateName current_state_name_, next_state_name_;
+    StateName current_state_name_{StateName::kEmergency};
+    StateName next_state_name_{StateName::kEmergency};
 
     std::thread run_thread_;
 
@@ -56,16 +62,23 @@ public:
     double last_robot_feedback_timestamp_{0.0};
 
     const RobotName robot_name_;
+    const RecordingConfig recording_config_;
+    const std::string end_effector_name_;
+    const bool periodic_log_enabled_;
 
     /**
      * @brief Construct a humanoid state machine.
      * @param robot_name Robot name.
      */
-    HumanoidStateMachine(RobotName robot_name)
+    HumanoidStateMachine(RobotName robot_name,
+                         RecordingConfig recording_config = {},
+                         std::string end_effector_name = {},
+                         bool periodic_log_enabled = false)
         : robot_name_(robot_name),
+          recording_config_(std::move(recording_config)),
+          end_effector_name_(std::move(end_effector_name)),
+          periodic_log_enabled_(periodic_log_enabled),
           motion_state_store_(std::make_shared<MotionStateStore>()) {}
-
-    ~HumanoidStateMachine() {}
 
     /**
      * @brief Initialize interfaces, controllers, and the first state.
@@ -78,6 +91,28 @@ public:
         ri_ptr_ = std::make_shared<DR2ProInterface>(node_);
         cp_ptr_ = std::make_shared<ControlParameters>(robot_name_);
 
+        std::unique_ptr<EndEffector> end_effector =
+            CreateEndEffector(end_effector_name_);
+        if (end_effector) {
+            end_effector_ = std::shared_ptr<EndEffector>(
+                std::move(end_effector));
+            end_effector_->Start(node_);
+        }
+
+        RecordingConfig recording_config = recording_config_;
+        if (end_effector_) {
+            const auto names = end_effector_->StateNames();
+            recording_config.schema.state_names.insert(
+                recording_config.schema.state_names.end(), names.begin(),
+                names.end());
+            recording_config.schema.layout +=
+                "," + end_effector_->RecordingLayout();
+            recording_config.schema.end_effector = end_effector_->Name();
+        }
+        recording_manager_ =
+            std::make_shared<RecordingManager>(std::move(recording_config));
+        recording_manager_->Start();
+
         std::cout << "HumanoidInterface finish" << std::endl;
 
         std::shared_ptr<ControllerData> data_ptr = std::make_shared<ControllerData>();
@@ -85,16 +120,20 @@ public:
         data_ptr->uc_ptr = uc_ptr_;
         data_ptr->cp_ptr = cp_ptr_;
         data_ptr->motion_state_store = motion_state_store_;
+        data_ptr->recording_manager = recording_manager_;
+        data_ptr->end_effector = end_effector_;
 
         std::cout << "Control mode: teleoperation" << std::endl;
 
-        sc_ptr_ = std::make_shared<SafeController>("");
+        sc_ptr_ = std::make_shared<SafeController>();
         sc_ptr_->SetRobotDataSource(ri_ptr_);
         sc_ptr_->SetUserCommandDataSource(uc_ptr_);
 
         emergency_controller_ = std::make_shared<EmergencyState>(robot_name_, "emergency_state", data_ptr);
         zeropos_controller_ = std::make_shared<ZeroPosState>(robot_name_, "zeropos_state", data_ptr);
-        teleoperation_controller_ = std::make_shared<TeleoperationState>(robot_name_, "teleoperation", data_ptr);
+        teleoperation_controller_ = std::make_shared<TeleoperationState>(
+            robot_name_, "teleoperation", data_ptr,
+            periodic_log_enabled_);
         down_controller_ = std::make_shared<DownState>(robot_name_, "down_state", data_ptr);
 
         current_controller_ = emergency_controller_;
@@ -125,7 +164,14 @@ public:
                 continue;
             }
 
-            ri_ptr_->RefreshRobotData();
+            if (uc_ptr_->GetUserCommand()->safe_control_mode.load() != 0 &&
+                current_state_name_ != StateName::kEmergency) {
+                current_controller_->OnExit();
+                current_controller_ = emergency_controller_;
+                current_controller_->OnEnter();
+                current_state_name_ = StateName::kEmergency;
+                next_state_name_ = StateName::kEmergency;
+            }
 
             const double robot_feedback_timestamp = ri_ptr_->GetInterfaceTimeStamp();
             if (have_robot_feedback_timestamp_ && robot_feedback_timestamp == last_robot_feedback_timestamp_) {
@@ -146,7 +192,6 @@ public:
                 current_controller_->OnEnter();
                 current_state_name_ = next_state_name_;
             }
-            ++run_cnt_;
         }
     }
 
@@ -166,9 +211,6 @@ public:
      */
     std::shared_ptr<StateBase> GetStateControllerPtr(StateName state_name) {
         switch (state_name) {
-            case StateName::kInvalid: {
-                return nullptr;
-            }
             case StateName::kEmergency: {
                 return emergency_controller_;
             }
@@ -186,7 +228,6 @@ public:
                 return emergency_controller_;
             }
         }
-        return nullptr;
     }
 
     /**
@@ -201,7 +242,12 @@ public:
         }
         sc_ptr_->Stop();
         uc_ptr_->Stop();
-        ri_ptr_->Stop();
+        if (recording_manager_) {
+            recording_manager_->Shutdown();
+        }
+        if (end_effector_) {
+            end_effector_->Stop();
+        }
     }
 };
 }  // namespace deep_robotics::dr02_pro

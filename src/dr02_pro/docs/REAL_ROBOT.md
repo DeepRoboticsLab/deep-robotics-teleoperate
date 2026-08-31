@@ -243,6 +243,8 @@ The state machine publishes complete 31-DoF joint commands. Pico controls the
 waist and both arms, while leg motion is handled by the robot's internal
 policy. Do not switch Developer Modes while the robot is moving.
 
+Before using the Zhixing grippers, start `zx_gripper_sdk` on RK.
+
 ## 7. Start Robotics Service
 
 After compilation, open a new terminal (Terminal 1), connect to
@@ -267,8 +269,10 @@ On the Pico:
 4. Set the receiver address to the `<Orin-WiFi-IP>` queried earlier. This is
    the address on the current WiFi of the robot Orin running Robotics Service
    and `state_machine`.
-5. After the connection succeeds, enable **Head**, **Controller**, and
-   **Send**.
+5. After the connection succeeds, enable **Controller** and **Send**. Also
+   enable **Head** for normal teleoperation. If `state_machine` is started with
+   `--record`, keeping **Head** disabled is recommended because the current
+   dataset contract does not record waist-joint data.
 6. Keep the headset awake so that sleep does not interrupt data transmission.
 
 ## 9. Start the State Machine
@@ -279,6 +283,13 @@ required environment loaded, so run:
 
 ```bash
 ros2 run dr02_tele state_machine
+```
+
+This default command enables only the arms and waist and creates no gripper
+topics. To enable the Zhixing grippers, run:
+
+```bash
+ros2 run dr02_tele state_machine --ee zhixing
 ```
 
 If the build terminal has been closed, or if you prefer to run the state
@@ -293,6 +304,9 @@ cd ~/deep-robotics-teleoperate
 source install/setup.bash
 ros2 run dr02_tele state_machine
 ```
+
+Append `--ee zhixing`, `--record`, or both to the separate-terminal command as
+needed.
 
 The state machine first waits for `/JOINTS_DATA`. When the control prompt
 appears:

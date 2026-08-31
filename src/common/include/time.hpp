@@ -92,14 +92,6 @@ public:
         }
     }
 
-    /**
-     * @brief Check whether the timer file descriptor is valid.
-     * @return true if the timer is valid; false otherwise.
-     */
-    bool IsValid() const {
-        return fd_ != -1;
-    }
-
 private:
     /**
      * @brief Convert a microsecond duration to a POSIX timespec.

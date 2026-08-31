@@ -8,18 +8,31 @@
  *
  */
 #include <iostream>
-#include <string>
 
 #include "humanoid_state_machine.hpp"
+#include "runtime_options.hpp"
 
 using namespace deep_robotics::dr02_pro;
 
-int main() {
+int main(int argc, char** argv) {
+  RuntimeOptions options;
+  if (!ParseRuntimeOptions(argc, argv, options, std::cerr)) {
+    PrintUsage(argv[0], std::cerr);
+    return 2;
+  }
+  if (options.help_requested) {
+    PrintUsage(argv[0], std::cout);
+    return 0;
+  }
+
   std::cout << "State Machine Start Running" << std::endl;
-  rclcpp::init(0, 0);
+  rclcpp::init(argc, argv);
 
   std::shared_ptr<HumanoidStateMachine> fsm =
-      std::make_shared<HumanoidStateMachine>(RobotName::DR2PRO);
+      std::make_shared<HumanoidStateMachine>(RobotName::DR2PRO,
+                                             options.recording,
+                                             options.end_effector,
+                                             options.periodic_log_enabled);
   fsm->Start();
   fsm->Run();
   fsm->Stop();

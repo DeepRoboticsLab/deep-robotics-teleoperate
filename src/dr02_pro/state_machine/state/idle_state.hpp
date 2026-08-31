@@ -31,12 +31,10 @@ public:
                 cp_ptr_->neck_kd_;
         }
       }
-  ~EmergencyState() {}
-
     /**
      * @brief Enter the emergency state.
      */
-    virtual void OnEnter() {
+    void OnEnter() override {
         // Keep the entry pose as the position target. Replacing it with every
         // feedback sample would cancel the position error and leave only damping.
         joint_pos_hold_ = ri_ptr_->GetJointPosition();
@@ -46,12 +44,12 @@ public:
     /**
      * @brief Exit the emergency state.
      */
-    virtual void OnExit() { }
+    void OnExit() override {}
 
     /**
      * @brief Publish the emergency pose-hold joint command.
      */
-    virtual void Run() {
+    void Run() override {
         VecXf joint_pos_plan = joint_pos_hold_;
         VecXf joint_vel_plan = VecXf::Zero(cp_ptr_->dof_num_);
         VecXf joint_tor_plan = VecXf::Zero(cp_ptr_->dof_num_);
@@ -69,10 +67,9 @@ public:
      * @brief Get the next state requested from emergency.
      * @return Next state name.
      */
-    virtual StateName GetNextStateName() {
+    StateName GetNextStateName() override {
 
-        if (uc_ptr_->GetUserCommand()->safe_control_mode != 0) {
-            std::cout << "safe_control_mode:" << std::dec << uc_ptr_->GetUserCommand()->safe_control_mode << std::endl;
+        if (uc_ptr_->GetUserCommand()->safe_control_mode.load() != 0) {
             return StateName::kEmergency;
         }
 

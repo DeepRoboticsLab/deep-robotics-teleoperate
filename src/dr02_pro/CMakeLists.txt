@@ -21,7 +21,6 @@ if(BUILD_SIM)
 endif()
 
 option(BUILD_DR02_PRO_STATE_MACHINE "Build DR02 Pro state machine" ON)
-option(BUILD_DR02_PRO_MANIPULATION "Build DR02 Pro manipulation support" ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(deep_robotics_common REQUIRED)
@@ -29,11 +28,12 @@ find_package(rclcpp REQUIRED)
 find_package(drdds REQUIRED)
 find_package(std_msgs REQUIRED)
 
-if(BUILD_DR02_PRO_MANIPULATION OR BUILD_DR02_PRO_STATE_MACHINE)
-  add_subdirectory(manipulation)
-endif()
-
 if(BUILD_DR02_PRO_STATE_MACHINE)
+  add_subdirectory(manipulation)
+  add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../end_effector"
+    "${CMAKE_CURRENT_BINARY_DIR}/end_effector"
+  )
   add_subdirectory(state_machine)
 endif()
 

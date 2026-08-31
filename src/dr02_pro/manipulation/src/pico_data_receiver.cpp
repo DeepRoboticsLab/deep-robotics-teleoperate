@@ -9,7 +9,6 @@
  */
 #include "pico_data_receiver.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <dlfcn.h>
@@ -37,7 +36,6 @@ using PXREADeinitFn = int (*)();
 
 std::mutex g_pico_mutex;
 PicoState g_pico_state;
-std::atomic<bool> g_pico_connected{false};
 std::mutex g_pxrea_mutex;
 void* g_pxrea_handle = nullptr;
 PXREAInitFn g_pxrea_init = nullptr;
@@ -111,8 +109,6 @@ PicoControllerState ParseController(const json& value) {
     out.trigger = static_cast<float>(value.value("trigger", 0.0));
     out.primary = value.value("primaryButton", false);
     out.secondary = value.value("secondaryButton", false);
-    out.axis_click = value.value("axisClick", false);
-    out.axis = {static_cast<float>(value.value("axisX", 0.0)), static_cast<float>(value.value("axisY", 0.0))};
     out.valid = true;
     return out;
 }
@@ -196,11 +192,9 @@ bool TryParseHeadPose(const json& value, PicoHeadState& out) {
 void OnPicoCallback(void*, PXREAClientCallbackType type, int status, void* user_data) {
     switch (type) {
         case PXREAServerConnect:
-            g_pico_connected.store(true);
             std::cout << "[PicoTeleoperation] PXREA server connected" << std::endl;
             break;
         case PXREAServerDisconnect:
-            g_pico_connected.store(false);
             std::cout << "[PicoTeleoperation] PXREA server disconnected" << std::endl;
             break;
         case PXREADeviceFind:
@@ -280,8 +274,6 @@ int PicoDataReceiver::Start() {
         std::lock_guard<std::mutex> lock(g_pico_mutex);
         g_pico_state = PicoState{};
     }
-    g_pico_connected.store(false);
-
     const int rc = g_pxrea_init(nullptr, &OnPicoCallback, PXREAFullMask);
     started_ = (rc == 0);
     std::cout << "[PicoTeleoperation] PXREAInit returned " << rc << std::endl;
@@ -301,10 +293,6 @@ void PicoDataReceiver::Stop() {
 PicoState PicoDataReceiver::Snapshot() const {
     std::lock_guard<std::mutex> lock(g_pico_mutex);
     return g_pico_state;
-}
-
-bool PicoDataReceiver::IsConnected() const {
-    return g_pico_connected.load();
 }
 
 }  // namespace deep_robotics::dr02_pro

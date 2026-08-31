@@ -13,7 +13,7 @@
 namespace deep_robotics::dr02_pro {
 class ZeroPosState : public StateBase {
 private:
-    float state_enter_time_, run_time_;
+    float state_enter_time_{0.0f}, run_time_{0.0f};
     VecXf joint_pos_init_, joint_vel_init_, joint_pos_, joint_vel_;
     VecXf kp_, kd_, joint_pos_goal_;
     MatXf joint_cmd_;
@@ -52,12 +52,10 @@ public:
         }
     }
 
-    ~ZeroPosState() {}
-
     /**
      * @brief Enter the zero-position state.
      */
-    virtual void OnEnter() {
+    void OnEnter() override {
         GetRobotJointValue();
         RecordJointData();
         motion_state_store_->SetState(RobotMotionState::ZeroPos);
@@ -66,12 +64,12 @@ public:
     /**
      * @brief Exit the zero-position state.
      */
-    virtual void OnExit() {}
+    void OnExit() override {}
 
     /**
      * @brief Run one zero-position interpolation update.
      */
-    virtual void Run() {
+    void Run() override {
         GetRobotJointValue();
 
         VecXf joint_pos_plan = VecXf::Zero(cp_ptr_->dof_num_);
@@ -106,9 +104,8 @@ public:
      * @brief Get the next state requested from zero position.
      * @return Next state name.
      */
-    virtual StateName GetNextStateName() {
-        if (uc_ptr_->GetUserCommand()->safe_control_mode != 0) {
-            std::cout << "safe_control_mode:" << std::dec << uc_ptr_->GetUserCommand()->safe_control_mode << std::endl;
+    StateName GetNextStateName() override {
+        if (uc_ptr_->GetUserCommand()->safe_control_mode.load() != 0) {
             return StateName::kEmergency;
         }
 

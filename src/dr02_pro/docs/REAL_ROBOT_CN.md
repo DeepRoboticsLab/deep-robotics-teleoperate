@@ -211,6 +211,8 @@ source install/setup.bash
 
 状态机会发布完整的 31 自由度关节指令，其中 Pico 用于控制腰部和双臂，腿部运动由机器人内部策略负责。机器人运动过程中不得切换开发者模式。
 
+使用知行夹爪前，必须先在 RK 板启动 `zx_gripper_sdk`。
+
 ## 7. 启动 Robotics Service
 
 编译完成后，开启一个新的终端(终端 1)并连接 `10.21.33.106`，在机器人 Orin 上执行：
@@ -232,7 +234,7 @@ cd /opt/apps/roboticsservice/
 3. 点击 **Enter**。
 4. 将接收地址设置为前面查询到的 `<Orin-WiFi-IP>`。这是运行 Robotics Service 和
    `state_machine` 的机器人 Orin 在当前 WiFi 下的地址。
-5. 连接成功后打开 **Head**、**Controller**、**Send**。
+5. 连接成功后打开 **Head**、**Controller**、**Send**；如果启动`state_machine` 时使用了 `--record`，由于当前数据采集不记录腰部关节数据，建议关闭**Head**。
 6. 保持头显常亮，避免发送数据因休眠中断。
 
 ## 9. 启动状态机
@@ -241,6 +243,12 @@ cd /opt/apps/roboticsservice/
 
 ```bash
 ros2 run dr02_tele state_machine
+```
+
+该默认命令只启用双臂和腰部，不创建夹爪 Topic。需要知行夹爪时改为：
+
+```bash
+ros2 run dr02_tele state_machine --ee zhixing
 ```
 
 如果编译终端已经关闭，或者希望在独立终端中运行状态机，则开启终端 2，连接
@@ -254,6 +262,8 @@ cd ~/deep-robotics-teleoperate
 source install/setup.bash
 ros2 run dr02_tele state_machine
 ```
+
+上述独立终端命令同样可按需要追加 `--ee zhixing`、`--record` 或同时追加两者。
 
 状态机首先等待 `/JOINTS_DATA`。控制提示出现后：
 

@@ -9,8 +9,6 @@
  */
 #pragma once
 
-#include "utils.hpp"
-#include "time.hpp"
 #include "robot_interface.hpp"
 
 namespace deep_robotics::dr02_pro {
@@ -24,7 +22,6 @@ public:
     explicit DR2ProInterface(rclcpp::Node::SharedPtr node, const std::string& robot_name = "DR2PRO") 
         : RobotInterface(robot_name, 31, 12, 14, 3, 2, node) {
     }
-    ~DR2ProInterface() {};
 };
 
 }  // namespace deep_robotics::dr02_pro

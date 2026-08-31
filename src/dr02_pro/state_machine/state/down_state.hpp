@@ -93,7 +93,7 @@ public:
 
     StateName GetNextStateName() override {
         const UserCommand* command = uc_ptr_->GetUserCommand();
-        if (command->safe_control_mode != 0) {
+        if (command->safe_control_mode.load() != 0) {
             return StateName::kEmergency;
         }
         if (command->target_mode == uint8_t(RobotMotionState::Emergency)) {

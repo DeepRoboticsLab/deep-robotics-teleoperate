@@ -21,11 +21,14 @@ rate therefore follows joint feedback; it is not a fixed 500 Hz.
 | --- | --- | --- |
 | `/JOINTS_DATA` | Subscribe | 31-DoF position, velocity, torque, temperature, and status feedback; each new frame triggers one control update. |
 | `/JOINTS_CMD` | Publish | Complete 31-DoF position-PD command. |
+| `/gripper/position` | Subscribe | Feedback `[side, position]` from the new Zhixing SDK on RK; created only with `--ee zhixing`. |
+| `/gripper/position_cmd` | Publish | Dual-side command `[2, left, right]` for the new Zhixing SDK; first published after fresh grip input, then once every 20 control updates. |
 | `/GAMEPAD_KEY` | Subscribe | Optional state input recognizing the strings for L1, L2, R1, and R2. |
 
 `wait data update` means that no `/JOINTS_DATA` frame has arrived. Before the
 first frame, the program does not enter its initial state or publish
-`/JOINTS_CMD`.
+`/JOINTS_CMD`. Without `--ee zhixing`, it never creates or publishes
+`/gripper/position_cmd`.
 
 ## 2. Joint-Control Ownership
 
@@ -40,6 +43,13 @@ first frame, the program does not enter its initial state or publish
 The state machine always constructs a 31-joint command. Which joint targets a
 real robot ultimately accepts also depends on its current Developer Mode. This
 project is approved only for Upper-Body Joint Control Developer Mode.
+
+Optional end effectors are separate from these 31 joints. With
+`--ee zhixing`, Orin publishes the `std_msgs/msg/Int32MultiArray` command
+`[2, left, right]` on `/gripper/position_cmd`; `2` selects both grippers and
+the remaining entries are their positions. The RK SDK publishes separate
+`[0, left_position]` and `[1, right_position]` feedback messages on
+`/gripper/position`.
 
 ## 3. State Transitions
 
@@ -60,7 +70,7 @@ stateDiagram-v2
 | --- | --- |
 | `Emergency` | Captures feedback position on entry and uses position PD to hold that pose. It is not power-off, damping, or a hardware emergency stop. |
 | `ZeroPos` | Uses a cubic spline to move all 31 joint commands to zero over three seconds, then holds zero. |
-| `Teleoperation` | Initializes Pico/PXREA, seeds targets from the entry pose, updates waist and arms, and holds leg and neck targets. |
+| `Teleoperation` | Initializes Pico/PXREA, seeds targets from the entry pose, updates waist and arms plus any selected end effector, and holds leg and neck targets. |
 | `Down` | Moves waist and arms to the down pose over three seconds while holding leg and neck entry targets. |
 
 ## 4. Keyboard and Robot Gamepad Input
@@ -83,7 +93,7 @@ On entry to `Teleoperation`, the state machine first reads current 31-joint
 feedback, initializes IK, targets, and filters, and then starts PXREA. The robot
 therefore does not jump directly toward an absolute Pico pose.
 
-### Controllers Drive the Arms
+### Controllers Drive the Arms and Optional Grippers
 
 - When a trigger reaches `0.5`, the current controller pose and corresponding
   robot end-effector pose become that side's anchor.
@@ -91,8 +101,11 @@ therefore does not jump directly toward an absolute Pico pose.
   frames use translation and rotation relative to it as the 6D target.
 - Releasing a trigger clears that side's anchor. The next press anchors at the
   current robot command pose, avoiding a jump to an old target.
-- Primary, secondary, grip, joystick-axis, and joystick-click data from both
-  controllers are received but are not currently bound to control functions.
+- With `--ee zhixing`, left and right grip values control their corresponding
+  grippers independently of the triggers. The default mode ignores grip.
+- When recording is enabled, the left primary button starts or finishes an
+  episode, and the left secondary button deletes the most recent completed
+  episode. Joystick-axis and joystick-click data are not currently bound.
 - The triggers operate independently, but both arm targets are solved together
   in one IK problem.
 
@@ -102,10 +115,27 @@ Controller mapping parameters:
 | --- | ---: |
 | Trigger threshold | `0.5` |
 | Translation deadband | `0.015 m` |
-| Translation scale | `1.44` |
+| Translation scale | `1.2` |
 | Maximum translation from anchor | `0.5 m` |
 | Rotation deadband | `0.035 rad` |
 | Maximum rotation from anchor | `1.45 rad` |
+| Grip input range | `[0, 1]` |
+| Gripper position range | `[0, 1000]`, using `position = grip × 1000` |
+| Gripper publication cadence | Once every 20 state-machine control updates |
+
+Translation and rotation deadbands use a continuous mapping: only the amount
+beyond the threshold is mapped, so crossing a threshold does not create a
+position or angle step.
+
+With Zhixing enabled, entering `Teleoperation` neither opens the grippers nor
+uses Pico input cached before entry. The first valid fresh grip packet received
+after entry is published immediately; later updates hold the latest target at
+the cadence above. Integer positions in `[0,1000]` are converted to CAN
+register operations by the SDK on RK. Missing or more than `200 ms` stale
+feedback from either gripper produces a rate-limited warning while arm and
+waist teleoperation continues. Because RK and Orin clocks differ, freshness is
+measured only from the Orin-local steady-clock arrival time; RK time is never
+used or compared.
 
 ### Headset Drives the Waist
 
@@ -127,15 +157,19 @@ per-feedback slew limit.
 The state machine uses the monotonic local receive time of Pico data to judge
 freshness. This value is not a network-latency measurement.
 
-- No valid packet, or no update for more than `200 ms`, enters stale hold.
-- Stale hold freezes the last target actually sent to the robot rather than
-  continuing toward an older unissued IK target.
-- Hand and headset anchors are cleared, and all triggers must be released.
-- After data recovers and all triggers are observed released, a new trigger
-  press can establish a new anchor.
+- No valid packet, or no update for more than `200 ms`, enters soft stale hold.
+- Soft stale hold freezes the last target actually sent to the robot rather
+  than continuing toward an older unissued IK target, and clears the hand and
+  headset anchors.
+- Soft stale exits after `3` consecutive fresh Pico packets. A held trigger is
+  re-anchored at the current controller pose and robot command, so it does not
+  need to be released first.
+- No update for more than `1000 ms` escalates to hard stale. After recovery,
+  all triggers must be released before control can resume.
+- Enabled grippers retain the most recent valid grip values and continue
+  holding those targets; stale Pico data never changes the cached target.
 
-If a trigger remains held during recovery, arm control intentionally does not
-resume immediately.
+Only hard-stale recovery remains held when a trigger is still pressed.
 
 ## 7. IK and Command-Protection Pipeline
 
@@ -143,18 +177,34 @@ On entry to `Teleoperation`, IK loads the default URDF or the file selected by
 `DR02_PRO_TELEOP_URDF`. It locks the 17 waist, neck, and leg joints in the full
 31-DoF model, leaving the 14 arm DoFs.
 
-Each joint-feedback frame runs up to 50 simultaneous dual-arm IK iterations.
-Protection and shaping occur in this order:
+Each fresh Pico state triggers at most one dual-arm solve with up to 50 internal
+iterations. Higher-rate joint feedback continues filtering and publishing the
+cached result. Protection and shaping occur in this order:
 
 1. Limit controller translation and rotation relative to the anchor.
 2. Solve both position and orientation targets, adding an outward soft cost
    with weight `5.0` when an elbow enters the torso cylinder of radius `0.25 m`.
-3. Clamp every IK iteration to the URDF joint-position limits.
-4. Pass the 14 arm targets through a four-frame weighted average
+   Joint-posture and seed-continuity regularization weights are `0.002` and
+   `0.02`, respectively.
+3. Clamp each internal candidate to the URDF joint-position limits. Accept a
+   step only when both the total Cartesian task error and the full objective do
+   not increase; otherwise perform up to six backtracking halvings and increase
+   damping adaptively.
+4. Preserve the best iterate so a worse final numerical iteration is never
+   returned.
+5. Reject a final candidate if it is non-finite, worsens task cost relative to
+   its seed, or leaves either end effector above `0.05 m` position error or
+   `15 deg` rotation error. Rejection holds the last arm command actually
+   issued and clears smoother velocity.
+6. For a valid candidate, limit each joint's raw target advance relative to
+   the current issued command to `0.5 rad` per solve. A larger valid solution is
+   clipped and continues through the smoother instead of being rejected, so
+   fast motion cannot lock the target at an old command.
+7. Pass the 14 arm targets through a four-frame weighted average
    `{0.1, 0.2, 0.3, 0.4}` and a critically damped second-order smoother with
-   `omega = 30`.
-5. Apply the following software limits to waist and arm targets.
-6. Limit final output relative to the previous command actually sent to
+   `omega = 30`. Publish both its smoothed arm positions and velocities.
+8. Apply the following software limits to waist and arm targets.
+9. Limit final output relative to the previous command actually sent to
    `0.006 rad` per feedback frame.
 
 | Index | Joint | Software range (rad) |
@@ -181,29 +231,35 @@ With `BUILD_SIM=OFF`, `SafeController` starts a separate monitoring thread
 whose period is configured as `2 ms`. The current implementation performs
 these checks:
 
-- It checks joint position, velocity, and torque for `NaN`. After the first
-  joint update has arrived, an unchanged joint-feedback timestamp for more
-  than `30 ms` is also an error. A joint whose position, velocity, and torque
-  all remain exactly unchanged for more than 100 monitoring cycles is likewise
-  treated as an error.
+- It checks that joint position, velocity, and torque are finite. After the
+  first joint update has arrived, a joint-feedback timestamp that remains
+  unchanged for more than `100 ms` is treated as an error and sets
+  `safe_control_mode=3`. Unchanged joint position, velocity, and torque values
+  are not treated as errors while complete feedback frames keep arriving.
 - It checks the maximum motor temperature once every 1000 monitoring cycles.
   Protection is triggered when the maximum is greater than
   `110 °C`.
 
-Any failed check sets `safe_control_mode` to a nonzero value. Each state checks
-that value on its next control update and requests `Emergency`. The state
-machine performs state control only when a new `/JOINTS_DATA` frame arrives.
-Therefore, if joint feedback stops completely, the safety request remains set,
-but the actual state transition waits for the next joint-feedback frame.
+Checks that reach an error condition set `safe_control_mode` to a nonzero
+value. The state machine checks this value before gating control on fresh
+feedback, so it leaves the active control state and enters `Emergency` even if
+joint feedback stops completely. No further joint command is generated or
+published without fresh feedback; the real robot must still provide an
+independent driver or hardware watchdog. The safety monitor does not emit
+periodic or error diagnostic output.
 
 
 ## 9. Runtime Diagnostics and Troubleshooting
 
-`Teleoperation` prints diagnostics once per second:
+Periodic diagnostics are disabled by default. When started with
+`ros2 run dr02_tele state_machine --log`, `Teleoperation` prints diagnostics
+once per second:
 
 ```text
 [PicoTeleoperation] diag pico_age_ms=... packets=...(total=...)
-parse_fail=...(total=...) feedback_hz=... ik_ms(avg/max)=.../...
+parse_fail=...(total=...) feedback_hz=... ik_hz=...
+ik_reject=...(total=...) ik_limit=...(total=...)
+ik_ms(avg/max)=.../...
 control_ms(avg/max)=.../... trigger(L/R)=.../... stale=...
 ```
 
@@ -213,6 +269,9 @@ control_ms(avg/max)=.../... trigger(L/R)=.../... stale=...
 | `packets` | Valid packets in the last second; zero means check Pico **Send** and Robotics Service. |
 | `parse_fail` | JSON parse failures; a growing value suggests a sender format or version mismatch. |
 | `feedback_hz` | Actual joint-feedback/control rate; low values indicate `/JOINTS_DATA` or DDS problems. |
+| `ik_hz` | Actual IK solve rate. IK runs once per fresh Pico packet instead of repeating at the higher joint-feedback rate. |
+| `ik_reject` | IK candidates rejected in the last second and in total; sustained growth indicates an unreachable target, a nearby singularity, or an input jump. |
+| `ik_limit` | Valid IK targets whose per-joint advance was clipped to `0.5 rad`; growth during fast motion is expected and does not freeze the smoother. |
 | `ik_ms(avg/max)` | Average/maximum IK time; spikes suggest unreachable targets, URDF issues, or host load. |
 | `control_ms(avg/max)` | Complete Teleoperation control and publish time. |
 | `trigger(L/R)` | Raw trigger values for checking the `0.5` threshold. |
@@ -227,7 +286,10 @@ Common startup messages:
 | `device found` | Robotics Service discovered the Pico device. |
 | `first state JSON` | The first Pico state was received and parsed. |
 | `trigger latched` | That side just established an anchor; continue moving to create a relative target. |
-| `Pico data stale` | Pico data has not updated for 200 ms and output is frozen. |
+| `reject IK candidate` | The candidate failed residual, task-cost, or numeric checks; the arm holds its last issued command. |
+| `limit IK target` | A valid IK solution exceeded the per-solve target-advance limit and was clipped instead of rejected. |
+| `Pico data stale` | Pico data has not updated for 200 ms; output is frozen while 3 fresh packets are awaited. |
+| `Pico data hard stale` | Pico data has not updated for 1000 ms; triggers must be released after recovery. |
 
 ## 10. Parameter Locations
 

@@ -1,53 +1,98 @@
-# DR02 Pro Pico Teleoperation Guide
+# DR02 Pro Pico Teleoperation
 
 **English** | [简体中文](README_CN.md) ·
 [Repository overview](../../README.md)
 
-`dr02_tele` is the DR02 Pro Pico upper-body teleoperation package. Its only
-runtime program is `state_machine`, which connects three data paths:
-
-- XRoboToolkit/PXREA supplies Pico headset and controller data.
-- ROS 2/DDS supplies joint feedback from the real robot or simulator.
-- The state machine publishes position-PD targets through `/JOINTS_CMD`.
-
-## Runtime Components
-
-| Component | Runs on | Purpose |
-| --- | --- | --- |
-| XRoboToolkit | Pico headset | Sends headset pose, controller poses, buttons, and trigger data. |
-| Robotics Service | Teleoperation host | Receives Pico data and provides the local PXREA service endpoint. |
-| `state_machine` | Same host as Robotics Service | Receives PXREA and ROS 2 data, calculates targets, and publishes commands. |
-| DR02 Pro or simulator | ROS 2/DDS network | Publishes feedback and receives joint commands. |
-
-Simulation teleoperation runs on an x86 simulation host. Real-robot
-teleoperation runs on the robot Orin at `10.21.33.106`. The Pico receiver
-address always points to the host running Robotics Service and `state_machine`.
+`dr02_tele` provides the `state_machine` executable for DR02 Pro upper-body
+teleoperation. PICO always controls the waist and both arms. End-effector
+control is disabled by default and can be enabled explicitly at runtime.
 
 ## Choose a Workflow
 
-| Goal | Document | Build configuration |
+| Target | Platform | Build settings | Complete guide |
+| --- | --- | --- | --- |
+| MuJoCo simulation | x86_64 | `BUILD_PLATFORM=x86`, `BUILD_SIM=ON` | [Simulation](docs/SIMULATION.md) |
+| DR02 Pro robot | ARM64 Orin | `BUILD_PLATFORM=arm`, `BUILD_SIM=OFF` | [Real robot](docs/REAL_ROBOT.md) |
+
+The PICO headset, Robotics Service, `state_machine`, and robot or simulator
+are separate runtime components. Follow the selected guide for installation,
+networking, build, and startup order.
+
+## Runtime Options
+
+```bash
+ros2 run dr02_tele state_machine [--log] [--record] [--record-dir PATH] [--ee zhixing]
+```
+
+| Option | Purpose |
+| --- | --- |
+| `--log` | Print PICO and control diagnostics once per second. |
+| `--record` | Enable integrated three-camera HDF5 episode recording. |
+| `--record-dir PATH` | Select the recording directory; requires `--record`. |
+| `--ee zhixing` | Enable the Zhixing dual gripper. Without this option no gripper topics are created. |
+
+Common combinations:
+
+| Command suffix | Control and recording layout |
+| --- | --- |
+| none | Arms and waist only; no recording |
+| `--record` | Arms and waist; 14-dimensional arm data |
+| `--ee zhixing` | Arms, waist, and Zhixing grippers; no recording |
+| `--ee zhixing --record` | Arms, waist, and Zhixing grippers; 16-dimensional data |
+
+Recording requires RealSense support and all three configured cameras. See the
+[recording guide](docs/RECORDING.md) for camera mapping, controls, and file
+format.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| `z` / L1 | Enter `ZeroPos` from `Emergency` or `Down`. |
+| `s` / L2 | Enter `Teleoperation` from `ZeroPos`. |
+| `d` / R2 | Enter `Down` from `Emergency` or `Teleoperation`. |
+| `e` / R1 | Enter the software `Emergency` pose hold. |
+| PICO trigger | Anchor and control the corresponding arm. |
+| PICO grip | Control the corresponding gripper when `--ee zhixing` is enabled. |
+
+When recording is enabled, the left primary button starts or finishes an
+episode, and the left secondary button deletes the most recent completed
+episode.
+
+## ROS 2 Interfaces
+
+| Topic | Direction | Purpose |
 | --- | --- | --- |
-| Simulation teleoperation | [Simulation Teleoperation](docs/SIMULATION.md) | x86 host, `BUILD_PLATFORM=x86`, `BUILD_SIM=ON` |
-| Real-robot teleoperation | [Real-Robot Teleoperation](docs/REAL_ROBOT.md) | Robot Orin, `BUILD_PLATFORM=arm`, `BUILD_SIM=OFF` |
+| `/JOINTS_DATA` | Subscribe | 31-DoF joint feedback |
+| `/JOINTS_CMD` | Publish | 31-DoF joint command |
+`/gripper/position` | Subscribe | Feedback `[side, position]` from the new Zhixing SDK on RK; exists only with `--ee zhixing` |
+| `/gripper/position_cmd` | Publish | Dual-gripper command `[2, left, right]` to the new Zhixing SDK on RK; exists only with `--ee zhixing` |
+| `/GAMEPAD_KEY` | Subscribe | Robot gamepad state commands |
 
-After completing the selected workflow, use
-[State Machine and Pico Control](docs/STATE_MACHINE.md) as the reference for
-state transitions, Pico behavior, protection mechanisms, diagnostics, and
-troubleshooting.
+Only one joint-command publisher may run on the same robot or simulator.
+Before using the Zhixing grippers, start `zx_gripper_sdk` on RK.
 
-## Directory Layout
+## Safety Behavior
 
-- `manipulation/`: PXREA reception, Pico-to-robot mapping, filtering, and
-  dual-arm IK
-- `state_machine/`: ROS 2 interfaces, input handling, runtime safety monitor,
-  and the `state_machine` executable
-- `docs/`: complete real-robot and simulation workflows plus the state-machine
-  reference
+- The real-robot build monitors joint feedback and motor temperature.
+- Invalid joint values or a feedback gap longer than `100 ms` request
+  `Emergency`; unchanged values remain valid when complete frames continue to
+  arrive.
+- Stale PICO input stops target updates and requires a safe recovery sequence.
+- `Emergency` holds a pose in software. It does not replace the robot's
+  physical emergency stop or hardware protection.
 
-> [!WARNING]
->
-> - Run only one `/JOINTS_CMD` publisher at a time.
-> - `Emergency` is a software pose hold, not a hardware emergency stop.
-> - Validate the complete workflow in simulation before controlling a real
->   robot for the first time. Real-robot validation must use a clear workspace
->   and begin with small motions.
+Always validate in simulation before first use on hardware. For state details,
+PICO behavior, and troubleshooting, see
+[State Machine and PICO Control](docs/STATE_MACHINE.md).
+
+## Package Layout
+
+```text
+src/
+├── end_effector/         Optional end-effector interface, factory, and implementations
+└── dr02_pro/
+    ├── manipulation/     PICO reception, input shaping, and dual-arm IK
+    ├── state_machine/    ROS 2 interfaces, state control, safety, and recording
+    └── docs/             Simulation, real-robot, control, and recording guides
+```

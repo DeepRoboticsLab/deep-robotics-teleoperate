@@ -12,6 +12,9 @@
   <depend>rclcpp</depend>
   <depend>drdds</depend>
   <depend>std_msgs</depend>
+  <depend>libhdf5-dev</depend>
+  <depend>libopencv-dev</depend>
+  <build_depend>librealsense2-dev</build_depend>
 
   <exec_depend>ament_cmake</exec_depend>
 

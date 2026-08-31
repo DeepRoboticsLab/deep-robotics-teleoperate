@@ -18,10 +18,8 @@ struct PicoControllerState {
     bool valid{false};
     bool primary{false};
     bool secondary{false};
-    bool axis_click{false};
     float grip{0.0f};
     float trigger{0.0f};
-    std::array<float, 2> axis{0.0f, 0.0f};
     std::array<double, 3> pos{0.0, 0.0, 0.0};
     std::array<double, 4> quat{0.0, 0.0, 0.0, 1.0};  // x, y, z, w
 };
@@ -55,7 +53,6 @@ public:
     int Start();
     void Stop();
     PicoState Snapshot() const;
-    bool IsConnected() const;
 
 private:
     bool started_{false};

@@ -12,6 +12,8 @@
 #include <array>
 #include <memory>
 
+#include "pico_data_receiver.hpp"
+
 namespace deep_robotics::dr02_pro {
 
 class PicoTeleoperationController {
@@ -21,25 +23,24 @@ public:
     struct Command {
         std::array<float, kDof> position{};
         std::array<float, kDof> velocity{};
+        bool left_primary_pressed = false;
+        bool left_secondary_pressed = false;
         bool ready = false;
     };
 
-    PicoTeleoperationController();
+    /**
+     * @brief Construct the Pico controller.
+     * @param periodic_log_enabled Print the periodic diagnostic when true.
+     */
+    explicit PicoTeleoperationController(
+        bool periodic_log_enabled = false);
     ~PicoTeleoperationController();
 
     PicoTeleoperationController(const PicoTeleoperationController&) = delete;
     PicoTeleoperationController& operator=(const PicoTeleoperationController&) = delete;
 
-    /**
-     * @brief Initialize the Pico SDK callback.
-     * @return Return code from PXREAInit, or 0 when already started.
-     */
-    int Start();
-
-    /**
-     * @brief Deinitialize the Pico SDK callback.
-     */
-    void Stop();
+    /** Reset controller-local session and recovery state. */
+    void Reset();
 
     /**
      * @brief Seed teleoperation targets from the current robot joint state.
@@ -52,23 +53,14 @@ public:
      * @param current Current 31-DoF joint positions.
      * @return Smoothed 31-DoF target command.
      */
-    Command Update(const std::array<float, kDof>& current);
+    Command Update(const std::array<float, kDof>& current,
+                   const PicoState& pico);
 
     /**
      * @brief Record total state-control time for the periodic diagnostic.
      * @param milliseconds Time from state update through command publication.
      */
     void RecordControlLoopDuration(double milliseconds);
-
-    /**
-     * @brief Reset hand/head anchors to the current robot state.
-     */
-    void ResetTargetsToCurrent(const std::array<float, kDof>& current);
-
-    /**
-     * @brief Whether the Pico server is currently connected.
-     */
-    bool IsConnected() const;
 
 private:
     class Impl;

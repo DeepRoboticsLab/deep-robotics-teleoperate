@@ -271,6 +271,21 @@ Start the components in this order:
    (it may be fully depressed), then move that controller only a small amount
    to begin validation.
 
+The default command creates no gripper topics. To inspect the Zhixing command
+path, start with `ros2 run dr02_tele state_machine --ee zhixing`. The current
+simulator does not display gripper motion, so inspect the topic in another
+terminal with the same ROS 2 environment and `ROS_DOMAIN_ID`:
+
+```bash
+ros2 topic echo /gripper/position_cmd
+```
+
+Entering `Teleoperation` does not publish an automatic open command. The first
+message is sent only after fresh post-entry grip input. Its format is
+`[2, left, right]`, where `2` selects both sides and the remaining positions
+follow their grip values from `0` to `1000`. Without an RK SDK publishing
+`/gripper/position`, 16-dimensional recording cannot start in simulation.
+
 For state transitions, Pico control, and diagnostic output, see
 [State Machine and Pico Control](STATE_MACHINE.md).
 
@@ -290,7 +305,8 @@ terminal.
 | Symptom | Check first |
 | --- | --- |
 | `state_machine` continues waiting for data | Whether the simulator is continuously publishing `/JOINTS_DATA`, and whether all terminals use the same `ROS_DOMAIN_ID` |
-| Simulator receives no commands | Whether `/JOINTS_CMD` exists, the state machine has received feedback, and the ROS 2/DDS environments match |
+| Simulator receives no commands | Check `/JOINTS_CMD`, state feedback, and the ROS 2/DDS environment; check `/gripper/position_cmd` only with `--ee zhixing` |
+| Grip produces no visible motion | The current simulator does not display gripper motion; inspect `/gripper/position_cmd` instead |
 | PXREA initialization fails | Whether `BUILD_PLATFORM=x86` was used and Robotics Service is running |
 | `packets=0` | Pico receiver IP, the **Send** switch, and Robotics Service |
 | `pico_age_ms > 200` | Whether the headset is asleep, the transmission switches, and the network between Pico and the host |

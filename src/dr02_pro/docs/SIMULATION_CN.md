@@ -234,6 +234,18 @@ cd ~/your_project/deep-robotics-simulation
 7. 等待终端出现 `PXREA server connected`、`device found` 和第一帧 Pico 数据提示。捏住单侧
    Pico 手柄的 trigger（可以捏到底），然后小幅移动该手柄开始验证。
 
+默认命令不会创建夹爪 Topic。若要检查知行夹爪指令链路，请使用
+`ros2 run dr02_tele state_machine --ee zhixing` 启动。当前仿真器尚未显示夹爪动作，可在另一个
+已加载相同 ROS 2 环境和 `ROS_DOMAIN_ID` 的终端中检查：
+
+```bash
+ros2 topic echo /gripper/position_cmd
+```
+
+进入 `Teleoperation` 时不会自动发送张开指令。进入后第一包新鲜 grip 到达时才发布第一条消息，
+消息格式为 `[2, left, right]`，其中 `2` 表示双侧，左、右位置随对应 grip 在 `0` 至
+`1000` 之间变化。仿真环境没有 RK 侧 SDK 发布 `/gripper/position` 时，16 维录制不会开始。
+
 状态切换、Pico 控制和诊断输出参阅[状态机与 Pico 控制](STATE_MACHINE_CN.md)。
 
 ## 6. 结束仿真会话
@@ -250,7 +262,8 @@ cd ~/your_project/deep-robotics-simulation
 | 现象 | 优先检查 |
 | --- | --- |
 | `state_machine` 一直等待数据 | 仿真器是否持续发布 `/JOINTS_DATA`，以及所有终端的 `ROS_DOMAIN_ID` |
-| 仿真器收不到指令 | `/JOINTS_CMD` 是否存在、状态机是否已收到反馈、ROS 2/DDS 环境是否一致 |
+| 仿真器收不到指令 | `/JOINTS_CMD`、状态机反馈和 ROS 2/DDS 环境；仅 `--ee zhixing` 时检查 `/gripper/position_cmd` |
+| Grip 没有显示动作 | 当前仿真器尚不显示夹爪动作；使用 `ros2 topic echo /gripper/position_cmd` 检查指令 |
 | PXREA 初始化失败 | 是否使用 `BUILD_PLATFORM=x86`，以及 Robotics Service 是否正常运行 |
 | `packets=0` | Pico 接收 IP、**Send** 开关和 Robotics Service |
 | `pico_age_ms > 200` | 头显是否休眠、发送开关和 Pico 到主机的网络 |

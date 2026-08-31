@@ -22,15 +22,19 @@
 
 namespace deep_robotics::dr02_pro {
 
+class RecordingManager;
+class EndEffector;
+
 struct ControllerData {
     std::shared_ptr<RobotInterface> ri_ptr;
     std::shared_ptr<UserCommandInterface> uc_ptr;
     std::shared_ptr<ControlParameters> cp_ptr;
     std::shared_ptr<MotionStateStore> motion_state_store;
+    std::shared_ptr<RecordingManager> recording_manager;
+    std::shared_ptr<EndEffector> end_effector;
 };
 
 class StateBase {
-private:
 public:
     StateBase(const RobotName& robot_name, const std::string& state_name, std::shared_ptr<ControllerData> data_ptr)
         : robot_name_(robot_name), state_name_(state_name), data_ptr_(data_ptr) {

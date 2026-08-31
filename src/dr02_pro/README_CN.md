@@ -1,45 +1,91 @@
-# DR02 Pro Pico 遥操使用指南
+# DR02 Pro Pico 遥操作
 
 [English](README.md) | **简体中文** ·
 [返回仓库总览](../../README_CN.md)
 
-`dr02_tele` 是 DR02 Pro Pico 上半身遥操软件包，唯一的运行程序是 `state_machine`。该程序
-连接三条数据链路：
+`dr02_tele` 提供 DR02 Pro 上半身遥操作程序 `state_machine`。PICO 默认控制腰部和双臂；
+末端执行器默认关闭，必须通过运行参数显式启用。
 
-- XRoboToolkit/PXREA 提供 Pico 头显和手柄数据。
-- ROS 2/DDS 提供实机或仿真器的关节反馈。
-- 状态机通过 `/JOINTS_CMD` 发布位置 PD 目标。
+## 选择运行方式
 
+| 目标 | 平台 | 编译配置 | 完整指南 |
+| --- | --- | --- | --- |
+| MuJoCo 仿真 | x86_64 | `BUILD_PLATFORM=x86`、`BUILD_SIM=ON` | [仿真遥操作](docs/SIMULATION_CN.md) |
+| DR02 Pro 实机 | ARM64 Orin | `BUILD_PLATFORM=arm`、`BUILD_SIM=OFF` | [真机遥操作](docs/REAL_ROBOT_CN.md) |
 
-## 运行组件
+PICO 头显、Robotics Service、`state_machine` 和机器人或仿真器是相互独立的运行组件。
+安装、网络、编译及启动顺序请直接按照对应的完整指南执行。
 
-| 组件 | 运行位置 | 作用 |
+## 运行选项
+
+```bash
+ros2 run dr02_tele state_machine [--log] [--record] [--record-dir PATH] [--ee zhixing]
+```
+
+| 选项 | 作用 |
+| --- | --- |
+| `--log` | 每秒输出一次 PICO 与控制诊断信息。 |
+| `--record` | 启用集成的三相机 HDF5 episode 录制。 |
+| `--record-dir PATH` | 指定录制目录，必须与 `--record` 一起使用。 |
+| `--ee zhixing` | 启用知行双夹爪；不带该参数时不会创建夹爪 Topic。 |
+
+常用组合：
+
+| 命令后缀 | 控制与录制布局 |
+| --- | --- |
+| 无 | 仅双臂和腰部，不录制 |
+| `--record` | 双臂和腰部，录制 14 维双臂数据 |
+| `--ee zhixing` | 双臂、腰部和知行夹爪，不录制 |
+| `--ee zhixing --record` | 双臂、腰部和知行夹爪，录制 16 维数据 |
+
+录制功能需要 RealSense 支持和三台已配置的相机。相机映射、录制操作及文件格式见
+[三相机数据录制](docs/RECORDING_CN.md)。
+
+## 控制方式
+
+| 输入 | 动作 |
+| --- | --- |
+| `z` / L1 | 从 `Emergency` 或 `Down` 进入 `ZeroPos`。 |
+| `s` / L2 | 从 `ZeroPos` 进入 `Teleoperation`。 |
+| `d` / R2 | 从 `Emergency` 或 `Teleoperation` 进入 `Down`。 |
+| `e` / R1 | 进入软件 `Emergency` 姿态保持。 |
+| PICO trigger | 建立锚点并控制对应机械臂。 |
+| PICO grip | 使用 `--ee zhixing` 时控制对应夹爪。 |
+
+启用录制时，PICO 左手柄主键用于开始或结束 episode，副键用于删除最近一个已完成的
+episode。
+
+## ROS 2 接口
+
+| Topic | 方向 | 作用 |
 | --- | --- | --- |
-| XRoboToolkit | Pico 头显 | 发送头显姿态、手柄姿态、按键和 trigger 数据。 |
-| Robotics Service | 遥操运行主机 | 接收 Pico 数据，并提供本机 PXREA 服务端点。 |
-| `state_machine` | 与 Robotics Service 相同的主机 | 接收 PXREA 和 ROS 2 数据、计算目标并发布指令。 |
-| DR02 Pro 或仿真器 | ROS 2/DDS 网络 | 发布反馈并接收关节指令。 |
+| `/JOINTS_DATA` | 订阅 | 31 自由度关节反馈 |
+| `/JOINTS_CMD` | 发布 | 31 自由度关节指令 |
+| `/gripper/position` | 订阅 | RK 侧新知行 SDK 的夹爪反馈 `[side, position]`；仅`--ee zhixing` 模式存在 |
+| `/gripper/position_cmd` | 发布 | 发往 RK 侧新知行 SDK 的双夹爪指令 `[2, left,right]`；仅 `--ee zhixing` 模式存在 |
+| `/GAMEPAD_KEY` | 订阅 | 机器人手柄状态指令 |
 
-仿真遥操运行在 x86 仿真主机，真机遥操运行在机器人 Orin（`10.21.33.106`）。Pico 的接收地址始终指向运行 Robotics Service 和 `state_machine` 的主机。
+同一机器人或仿真器上只能运行一个关节指令发布者。
+使用知行夹爪前，必须先在 RK 板启动 `zx_gripper_sdk`。
 
-## 选择使用流程
+## 安全行为
 
-| 目标 | 使用文档 | 编译配置 |
-| --- | --- | --- |
-| 仿真遥操 | [仿真遥操](docs/SIMULATION_CN.md) | x86 主机，`BUILD_PLATFORM=x86`、`BUILD_SIM=ON` |
-| 真机遥操 | [真机遥操](docs/REAL_ROBOT_CN.md) | 机器人 Orin，`BUILD_PLATFORM=arm`、`BUILD_SIM=OFF` |
+- 真机编译版本会监控关节反馈和电机温度。
+- 关节数据非法或反馈中断超过 `100 ms` 时请求进入 `Emergency`；只要完整反馈帧持续
+  到达，关节数值保持不变仍视为正常。
+- PICO 数据过期后会停止更新目标，并要求按安全流程恢复。
+- `Emergency` 是软件姿态保持，不能代替机器人物理急停和硬件保护。
 
-完成所选流程后，可将[状态机与 Pico 控制](docs/STATE_MACHINE_CN.md)作为状态切换、Pico 行为、
-保护机制、诊断和排障的参考文档。
+首次控制实机前必须先完成仿真验证。状态流转、PICO 行为和故障排查见
+[状态机与 PICO 控制](docs/STATE_MACHINE_CN.md)。
 
-## 目录结构
+## 软件包结构
 
-- `manipulation/`：PXREA 接收、Pico 到机器人的映射、滤波和双臂 IK
-- `state_machine/`：ROS 2 接口、输入处理、运行时安全监控和 `state_machine` 可执行程序
-- `docs/`：完整的真机、仿真流程和状态机参考文档
-
-> [!WARNING]
->
-> - 同一时刻只能运行一个 `/JOINTS_CMD` 发布者。
-> - `Emergency` 是软件姿态保持，不是硬件急停。
-> - 首次控制实机前应先在仿真中验证完整流程；真机验证必须清空工作空间并从小幅动作开始。
+```text
+src/
+├── end_effector/         可选末端执行器接口、工厂和具体实现
+└── dr02_pro/
+    ├── manipulation/     PICO 数据接收、输入整形和双臂 IK
+    ├── state_machine/    ROS 2 接口、状态控制、安全监控和数据录制
+    └── docs/             仿真、真机、控制和录制指南
+```

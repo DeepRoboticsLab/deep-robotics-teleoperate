@@ -24,6 +24,19 @@ class Dr2ArmIK {
 public:
     static constexpr int kDof = 31;
 
+    struct SolveResult {
+        Eigen::VectorXd q;
+        Eigen::Matrix<double, 6, 1> left_error{
+            Eigen::Matrix<double, 6, 1>::Zero()};
+        Eigen::Matrix<double, 6, 1> right_error{
+            Eigen::Matrix<double, 6, 1>::Zero()};
+        double seed_task_cost{0.0};
+        double task_cost{0.0};
+        int iterations{0};
+        int accepted_steps{0};
+        bool converged{false};
+    };
+
     Dr2ArmIK();
 
     Eigen::VectorXd ToArmQ(const std::array<float, kDof>& q) const;
@@ -31,8 +44,9 @@ public:
     void UpdateFK(const Eigen::VectorXd& q);
     Eigen::Matrix4d LeftPose() const;
     Eigen::Matrix4d RightPose() const;
-    Eigen::VectorXd Solve(const Eigen::Matrix4d& target_left, const Eigen::Matrix4d& target_right,
-                          const Eigen::VectorXd& seed);
+    SolveResult Solve(const Eigen::Matrix4d& target_left,
+                      const Eigen::Matrix4d& target_right,
+                      const Eigen::VectorXd& seed);
 
 private:
     static std::filesystem::path ResolveUrdfPath();
