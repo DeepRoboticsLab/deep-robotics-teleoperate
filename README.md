@@ -1,5 +1,7 @@
 # DEEPRobotics Teleoperate
 
+Watch the teleoperation demo on [YouTube](https://youtu.be/3T9cKVp1rlc?si=tNFjaenysMMZ8Y-F) or [Bilibili](https://b23.tv/GHEIDgg).
+
 [![ROS 2](https://img.shields.io/badge/ROS-2-22314E?logo=ros)](https://www.ros.org/)
 [![PICO XR](https://img.shields.io/badge/XR-PICO-00AEEF)](https://www.picoxr.com/)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus)](https://en.cppreference.com/w/cpp/17)

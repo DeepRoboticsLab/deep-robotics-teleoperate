@@ -1,5 +1,7 @@
 # DEEPRobotics Teleoperate
 
+在 [YouTube](https://youtu.be/3T9cKVp1rlc?si=tNFjaenysMMZ8Y-F) 或 [哔哩哔哩](https://b23.tv/GHEIDgg) 观看遥操作演示视频。
+
 [![ROS 2](https://img.shields.io/badge/ROS-2-22314E?logo=ros)](https://www.ros.org/)
 [![PICO XR](https://img.shields.io/badge/XR-PICO-00AEEF)](https://www.picoxr.com/cn/)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus)](https://zh.cppreference.com/w/cpp/17)
