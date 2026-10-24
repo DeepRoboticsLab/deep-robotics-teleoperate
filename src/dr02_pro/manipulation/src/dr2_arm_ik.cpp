@@ -97,7 +97,7 @@ Dr2ArmIK::Dr2ArmIK() {
     // attach the end-effector frame to the wrist joint with a 0.15 m offset.
     const auto left_wrist_joint_id = model_.getJointId("left_wrist_x_joint");
     const auto right_wrist_joint_id = model_.getJointId("right_wrist_x_joint");
-    const pinocchio::SE3 tool_offset(Eigen::Matrix3d::Identity(), Eigen::Vector3d(0.0, 0.0, 0.15));
+    const pinocchio::SE3 tool_offset(Eigen::Matrix3d::Identity(), Eigen::Vector3d(0.0, 0.0, -0.15));
 
 #if PINOCCHIO_VERSION_AT_LEAST(3, 0, 0)
     model_.addFrame(
