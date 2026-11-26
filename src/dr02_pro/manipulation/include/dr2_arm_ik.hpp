@@ -41,6 +41,8 @@ public:
 
     Eigen::VectorXd ToArmQ(const std::array<float, kDof>& q) const;
     void WriteArmQ(const Eigen::VectorXd& arm_q, std::array<float, kDof>& q) const;
+    /** Clamp arm positions; reject non-finite commands without modifying q. */
+    bool ClampArmCommand(std::array<float, kDof>& q) const;
     void UpdateFK(const Eigen::VectorXd& q);
     Eigen::Matrix4d LeftPose() const;
     Eigen::Matrix4d RightPose() const;

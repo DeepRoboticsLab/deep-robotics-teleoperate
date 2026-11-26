@@ -13,6 +13,9 @@
 | MuJoCo 仿真 | x86_64 | `BUILD_PLATFORM=x86`、`BUILD_SIM=ON` | [仿真遥操作](docs/SIMULATION_CN.md) |
 | DR02 Pro 实机 | ARM64 Orin | `BUILD_PLATFORM=arm`、`BUILD_SIM=OFF` | [真机遥操作](docs/REAL_ROBOT_CN.md) |
 
+真机支持 [WiFi 无线](docs/REAL_ROBOT_CN.md#231-wifi-无线连接)或
+[USB 有线](docs/REAL_ROBOT_CN.md#232-usb-有线连接)连接 Pico；两种方式共用编译和遥操流程。
+
 PICO 头显、Robotics Service、`state_machine` 和机器人或仿真器是相互独立的运行组件。
 安装、网络、编译及启动顺序请直接按照对应的完整指南执行。
 
@@ -51,9 +54,9 @@ ros2 run dr02_tele state_machine [--log] [--record] [--record-dir PATH] [--ee zh
 | `e` / R1 | 进入软件 `Emergency` 姿态保持。 |
 | PICO trigger | 建立锚点并控制对应机械臂。 |
 | PICO grip | 使用 `--ee zhixing` 时控制对应夹爪。 |
-
-启用录制时，PICO 左手柄主键用于开始或结束 episode，副键用于删除最近一个已完成的
-episode。
+| PICO 左手主键 / 副键 | 使用 `--record` 时开始或结束 episode / 删除最近已完成的 episode。 |
+| PICO 右手主键 / 副键 | 未绑定工程功能。 |
+| PICO 摇杆方向 / 按下 | 未解析或绑定。 |
 
 ## ROS 2 接口
 
@@ -74,6 +77,8 @@ episode。
 - 关节数据非法或反馈中断超过 `100 ms` 时请求进入 `Emergency`；只要完整反馈帧持续
   到达，关节数值保持不变仍视为正常。
 - PICO 数据过期后会停止更新目标，并要求按安全流程恢复。
+- 遥操初始化会拒绝非有限关节数据或超出所加载 URDF 限位的手臂位置，只容许 `1e-4 rad`
+  的舍入误差。
 - `Emergency` 是软件姿态保持，不能代替机器人物理急停和硬件保护。
 
 首次控制实机前必须先完成仿真验证。状态流转、PICO 行为和故障排查见

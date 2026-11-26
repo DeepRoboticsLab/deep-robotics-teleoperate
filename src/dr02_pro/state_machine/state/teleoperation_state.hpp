@@ -135,6 +135,9 @@ private:
      * @brief Publish a no-motion hold command using the same layout as ZeroPosState.
      */
     void PublishHoldCommand() {
+        if (!joint_pos_hold_.allFinite()) {
+            return;
+        }
         VecXf joint_pos_plan = joint_pos_hold_;
         VecXf joint_vel_plan = VecXf::Zero(cp_ptr_->dof_num_);
         VecXf joint_tor_plan = VecXf::Zero(cp_ptr_->dof_num_);

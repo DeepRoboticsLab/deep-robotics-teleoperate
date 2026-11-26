@@ -234,6 +234,11 @@ camera timestamps in the same row, and
 attributes prefixed with `max_*` store the maximum absolute offsets across the
 episode.
 
+Camera arrival and robot-state timestamps are host system-clock milliseconds
+since the Unix epoch, not the monotonic clock used for control timing. If the
+host date is in 1970, the saved timestamps reflect that date; avoid changing
+the system clock during an episode because synchronization uses these values.
+
 RGB images are encoded as JPEG at quality 95. Each image dataset uses a fixed
 row length of 500000 bytes, while `*_len` stores the actual JPEG length.
 HDF5 `deflate(1)` compresses the zero padding at the end of each row; it does

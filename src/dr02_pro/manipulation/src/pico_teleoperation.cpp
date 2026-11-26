@@ -36,7 +36,7 @@ constexpr int kLegStart = 17;
 constexpr float kTriggerThreshold = 0.5f;
 constexpr float kTransDeadband = 0.015f;
 constexpr float kTransScale = 1.2f;
-constexpr float kMaxHandTranslation = 0.5f;
+constexpr float kMaxHandTranslation = std::numeric_limits<float>::infinity();
 constexpr double kRotationDeadband = 0.035;
 constexpr double kMaxHandRotation = 1.45;
 constexpr float kMaxStepPerTick = 0.006f;
@@ -126,15 +126,7 @@ double WrapAngle(double angle) {
 class PicoTeleoperationController::Impl {
 public:
     explicit Impl(bool periodic_log_enabled)
-        : periodic_log_enabled_(periodic_log_enabled) {
-        lower_.fill(-3.2f);
-        upper_.fill(3.2f);
-        SetArmLimits(3, true);
-        SetArmLimits(10, false);
-        SetRange(0, -0.6f, 0.6f);
-        SetRange(1, -0.4f, 0.4f);
-        SetRange(2, -0.4f, 0.4f);
-    }
+        : periodic_log_enabled_(periodic_log_enabled) {}
 
     void Reset() {
         diagnostics_started_ = false;
@@ -173,9 +165,15 @@ public:
             return;
         }
 
+        auto seed = current;
+        if (!ik_->ClampArmCommand(seed) ||
+            (ik_->ToArmQ(seed) - ik_->ToArmQ(current)).cwiseAbs().maxCoeff() > 1e-4) {
+            have_state_ = false;
+            return;
+        }
         current_ = current;
-        target_ = current;
-        command_ = current;
+        command_ = seed;
+        target_ = command_;
         for (int i = 0; i < 3; ++i) {
             waist_target_[i] = current_[i];
         }
@@ -230,14 +228,14 @@ public:
         if (soft_stale_timeout) {
             EnterStaleHold(hard_stale_timeout, pico.state_sequence, now_ns);
             UpdateTriggerStatus(pico, true);
-            BuildOutput(out);
+            BuildOutput(out, feedback_dt);
             ReportDiagnostics(pico, now_ns);
             return out;
         }
 
         if (pico_stale_ && !HasStablePicoRecovery(pico.state_sequence)) {
             UpdateTriggerStatus(pico, true);
-            BuildOutput(out);
+            BuildOutput(out, feedback_dt);
             ReportDiagnostics(pico, now_ns);
             return out;
         }
@@ -251,7 +249,7 @@ public:
                 trigger_release_required_ = false;
                 std::cout << "[PicoTeleoperation] Pico stream recovered; release acknowledged" << std::endl;
             }
-            BuildOutput(out);
+            BuildOutput(out, feedback_dt);
             ReportDiagnostics(pico, now_ns);
             return out;
         }
@@ -386,21 +384,24 @@ public:
             }
         }
         const Eigen::VectorXd filtered_q =
-            FilterArmTarget(raw_arm_target_, feedback_dt);
+            FilterArmTarget(raw_arm_target_, Clamp(feedback_dt, kMinFeedbackDt, kMaxFeedbackDt));
         ik_->WriteArmQ(filtered_q, target_);
+        if (!ik_->ClampArmCommand(target_)) {
+            HoldArmAtLastCommand();
+        }
 
         ApplyHeadPoseToWaist(pico.head);
         for (int i = 0; i < 3; ++i) {
             target_[i] = waist_target_[i];
         }
-        for (int i = 0; i < kLegStart; ++i) {
+        for (int i = 0; i < kArmStart; ++i) {
             target_[i] = static_cast<float>(Clamp(target_[i], lower_[i], upper_[i]));
         }
         for (int i = kLegStart; i < kDof; ++i) {
             target_[i] = current_[i];
         }
 
-        BuildOutput(out);
+        BuildOutput(out, feedback_dt);
         ReportDiagnostics(pico, now_ns);
         return out;
     }
@@ -448,21 +449,6 @@ private:
         return true;
     }
 
-    void SetRange(int idx, float lo, float hi) {
-        lower_[idx] = lo;
-        upper_[idx] = hi;
-    }
-
-    void SetArmLimits(int start, bool left) {
-        SetRange(start + 0, -1.2f, 1.4f);
-        SetRange(start + 1, left ? -0.7f : -1.8f, left ? 1.8f : 0.7f);
-        SetRange(start + 2, -1.6f, 1.6f);
-        SetRange(start + 3, -0.2f, 1.8f);
-        SetRange(start + 4, -2.6f, 2.6f);    // wrist-z
-        SetRange(start + 5, -1.45f, 1.45f);  // wrist-y
-        SetRange(start + 6, -1.45f, 1.45f);  // wrist-x
-    }
-
     double GetFeedbackDt(const std::chrono::steady_clock::time_point& now) {
         double dt = kMaxFeedbackDt;
         if (have_update_time_) {
@@ -470,7 +456,7 @@ private:
         }
         last_update_time_ = now;
         have_update_time_ = true;
-        return Clamp(dt, kMinFeedbackDt, kMaxFeedbackDt);
+        return dt > 0.0 ? dt : kMinFeedbackDt;
     }
 
     void ResetSmoother(const Eigen::VectorXd& arm_q) {
@@ -646,16 +632,24 @@ private:
             Clamp(waist_anchor_[2] - kHeadRollToWaistY * filtered_head_delta_[0], lower_[2], upper_[2]));
     }
 
-    void BuildOutput(Command& out) {
+    void BuildOutput(Command& out, double feedback_dt) {
+        const auto previous_command = command_;
         for (int i = 0; i < kDof; ++i) {
             command_[i] = (i >= kLegStart) ? current_[i] : Slew(command_[i], target_[i], kMaxStepPerTick);
-            out.position[i] = command_[i];
             out.velocity[i] = 0.0f;
         }
+        // Also cover hold/recovery paths, which can bypass target filtering.
+        if (!ik_->ClampArmCommand(command_)) {
+            command_ = previous_command;
+            HoldArmAtLastCommand();
+        }
+        out.position = command_;
         if (smoother_initialized_) {
             for (int i = 0; i < kArmDof; ++i) {
-                out.velocity[kArmStart + i] =
-                    static_cast<float>(smoothed_arm_dq_[i]);
+                const int index = kArmStart + i;
+                // Match the position actually sent after slew and URDF clamps.
+                out.velocity[index] = static_cast<float>(
+                    (command_[index] - previous_command[index]) / feedback_dt);
             }
         }
         out.ready = true;
@@ -787,8 +781,8 @@ private:
     std::array<float, kDof> current_{};
     std::array<float, kDof> target_{};
     std::array<float, kDof> command_{};
-    std::array<float, kDof> lower_{};
-    std::array<float, kDof> upper_{};
+    std::array<float, kArmStart> lower_{-0.6f, -0.4f, -0.4f};
+    std::array<float, kArmStart> upper_{0.6f, 0.4f, 0.4f};
     std::array<float, 3> waist_target_{0.0f, 0.0f, 0.0f};
 
     std::array<std::array<double, kArmDof>, 4> arm_history_{};

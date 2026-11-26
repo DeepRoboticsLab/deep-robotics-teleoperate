@@ -10,6 +10,7 @@
 #include "dr2_arm_ik.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -40,7 +41,7 @@ constexpr double kRotationWeight = 8.0;
 constexpr double kElbowCylinderWeight = 5.0;
 constexpr double kElbowCylinderRadius = 0.25;
 constexpr double kJointRegularization = 0.002;
-constexpr double kSeedRegularization = 0.02;
+constexpr double kSeedRegularization = 0.2;
 constexpr double kMaxIkStepNorm = 0.05;
 
 double Clamp(double value, double lo, double hi) {
@@ -145,6 +146,28 @@ void Dr2ArmIK::WriteArmQ(const Eigen::VectorXd& arm_q, std::array<float, kDof>& 
         q[kLeftArmStart + i] = static_cast<float>(arm_q(i));
         q[kRightArmStart + i] = static_cast<float>(arm_q(i + 7));
     }
+}
+
+bool Dr2ArmIK::ClampArmCommand(std::array<float, kDof>& q) const {
+    if (!std::all_of(q.begin(), q.end(), [](float value) { return std::isfinite(value); })) {
+        return false;
+    }
+    for (int i = 0; i < model_.nq; ++i) {
+        const double lower = model_.lowerPositionLimit(i);
+        const double upper = model_.upperPositionLimit(i);
+        float lo = static_cast<float>(lower);
+        float hi = static_cast<float>(upper);
+        // Round inward so a float command cannot exceed the double URDF bounds.
+        if (static_cast<double>(lo) < lower) {
+            lo = std::nextafter(lo, hi);
+        }
+        if (static_cast<double>(hi) > upper) {
+            hi = std::nextafter(hi, lo);
+        }
+        const int index = i < 7 ? kLeftArmStart + i : kRightArmStart + i - 7;
+        q[index] = std::max(lo, std::min(q[index], hi));
+    }
+    return true;
 }
 
 void Dr2ArmIK::UpdateFK(const Eigen::VectorXd& q) {

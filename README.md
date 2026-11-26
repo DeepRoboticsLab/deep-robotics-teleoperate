@@ -17,6 +17,8 @@ humanoid robot. It converts PICO headset and controller input into waist and
 dual-arm commands for either a real robot or a MuJoCo simulation. A runtime
 option enables supported end effectors, and real-robot data collection can
 record either arms only or arms plus the selected end effector.
+For real-robot use, Pico can connect to the robot Orin over WiFi or a Type-C
+data cable; see the [real-robot guide](src/dr02_pro/docs/REAL_ROBOT.md).
 
 ## System Overview
 

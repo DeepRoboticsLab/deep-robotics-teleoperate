@@ -123,6 +123,10 @@ deep-robotics-teleoperate/
 
 ## 4. 编译仿真版本
 
+ROS 2 软件包建议在未激活 Conda 的终端中编译。若当前已激活 Conda，先执行
+`conda deactivate` 直到退出环境，再加载下文的 ROS 2 和消息接口环境，避免 Conda 库与系统库
+混用。这不影响仿真器单独使用的 Python 虚拟环境。
+
 ### 4.1 编译并加载消息接口
 
 先加载 ROS 2 环境，再进入第 2 节下载的
@@ -147,7 +151,8 @@ source install/setup.bash
 ```bash
 cd ~/your_project/deep-robotics-teleoperate
 colcon build --packages-up-to dr02_tele \
-  --cmake-args -DBUILD_PLATFORM=x86 -DBUILD_SIM=ON
+  --cmake-args -DBUILD_PLATFORM=x86 -DBUILD_SIM=ON \
+  -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
 ```
 
@@ -157,6 +162,11 @@ source install/setup.bash
 source /opt/ros/<ros-distro>/setup.bash
 source ~/your_project/deep-robotics-msg/install/setup.bash
 ```
+
+若已有 CMake 缓存包含 Miniforge/Conda 路径，或链接时报 OpenSSL 符号缺失，退出 Conda 后，
+在上述编译命令的 `--cmake-args` 前添加 `--cmake-clean-cache` 重新配置。
+`deep_robotics_common` 提示未使用 `BUILD_PLATFORM`、`BUILD_SIM` 可以忽略，这些选项由
+`dr02_tele` 使用。
 
 `BUILD_SIM=ON` 只会关闭真机使用的运行时 `SafeController` 监控，不会启动仿真器，也不会修改
 ROS Topic 或 Pico 控制逻辑。
@@ -268,6 +278,8 @@ ros2 topic echo /gripper/position_cmd
 | `packets=0` | Pico 接收 IP、**Send** 开关和 Robotics Service |
 | `pico_age_ms > 200` | 头显是否休眠、发送开关和 Pico 到主机的网络 |
 | IK 初始化失败 | DR02 Pro URDF 路径及模型版本 |
+| 有数据但遥操仍保持 | 关节反馈是否有限、双臂是否位于所加载 URDF 限位内，以及 trigger 与断流恢复状态 |
+| 持续出现 `reject IK candidate` | 对照日志残差与位置/姿态阈值，详见[IK 诊断](STATE_MACHINE_CN.md#9-运行诊断与排障) |
 
 > [!NOTE]
 >

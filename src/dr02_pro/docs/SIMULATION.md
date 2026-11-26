@@ -143,6 +143,11 @@ deep-robotics-teleoperate/
 
 ## 4. Build for Simulation
 
+Build ROS 2 packages in a terminal without an active Conda environment. If
+Conda is active, run `conda deactivate` until it is inactive, then load the ROS
+2 and message-interface environments below. This avoids mixing Conda and
+system libraries; the simulator's separate Python environment is unaffected.
+
 ### 4.1 Build and Load the Message Interfaces
 
 First load the ROS 2 environment, then enter the
@@ -170,7 +175,8 @@ terminal, enter the teleoperation project, and build the simulation version:
 ```bash
 cd ~/your_project/deep-robotics-teleoperate
 colcon build --packages-up-to dr02_tele \
-  --cmake-args -DBUILD_PLATFORM=x86 -DBUILD_SIM=ON
+  --cmake-args -DBUILD_PLATFORM=x86 -DBUILD_SIM=ON \
+  -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
 ```
 
@@ -181,6 +187,12 @@ this order first:
 source /opt/ros/<ros-distro>/setup.bash
 source ~/your_project/deep-robotics-msg/install/setup.bash
 ```
+
+If an existing CMake cache contains Miniforge/Conda paths or linking fails with
+OpenSSL symbol errors, add `--cmake-clean-cache` before `--cmake-args` in the
+build command above after leaving Conda. The unused `BUILD_PLATFORM` and
+`BUILD_SIM` warnings from `deep_robotics_common` are harmless; these options
+are consumed by `dr02_tele`.
 
 `BUILD_SIM=ON` only disables the runtime `SafeController` monitor used on the
 real robot. It does not start the simulator or change the ROS Topics or Pico
@@ -311,6 +323,8 @@ terminal.
 | `packets=0` | Pico receiver IP, the **Send** switch, and Robotics Service |
 | `pico_age_ms > 200` | Whether the headset is asleep, the transmission switches, and the network between Pico and the host |
 | IK initialization fails | DR02 Pro URDF path and model version |
+| Data arrives but teleoperation stays in hold | Finite joint feedback, arm positions within the loaded URDF limits, and trigger/stale-recovery state |
+| Repeated `reject IK candidate` | Check the logged residuals against the position/orientation thresholds; see [IK diagnostics](STATE_MACHINE.md#9-runtime-diagnostics-and-troubleshooting) |
 
 > [!NOTE]
 >

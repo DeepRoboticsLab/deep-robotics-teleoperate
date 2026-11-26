@@ -34,6 +34,9 @@
   Pro URDF.
 - Reworked the English and Chinese operating guides with separate, complete
   simulation and real-robot procedures.
+- Added WiFi and wired USB connection branches to the real-robot guides,
+  sharing service startup and teleoperation steps; USB uses Orin-side ADB
+  reverse forwarding on TCP port 63901.
 - Aligned the 500 Hz safety-monitor period and Eigen-safe structure layout
   with the common SDK.
 - Made Pico translation, rotation, and headset deadbands continuous so crossing
@@ -43,12 +46,20 @@
 - Applied the Pinocchio `Jlog6` correction to the 6D pose-error Jacobian.
 - Made IK accept only descending Cartesian-error steps, return the best
   numerical iterate, and hold the last issued arm command when a candidate is
-  non-finite, inaccurate, worse than its seed, or requires a large joint jump.
-- Aligned the controller translation scale (`1.2`), IK regularization
-  (`0.002` joint posture and `0.02` seed continuity), and per-joint target
-  advance (`0.5 rad`) with the CR1 teleoperation configuration.
-- Published the critically damped smoother's arm velocity together with its
-  position target.
+  non-finite, inaccurate, or worse than its seed.
+- Set controller translation scale to `1.2`, joint-posture regularization to
+  `0.002`, seed-continuity regularization to `0.2`, and per-joint target
+  advance to `0.5 rad`. Both elbow seed-continuity weights are multiplied by five.
+- Unified arm output limits with the URDF loaded by IK, including custom
+  `DR02_PRO_TELEOP_URDF` paths; waist software limits remain independent.
+- Removed the fixed `0.5 m` controller translation magnitude cap while retaining
+  translation deadband/scaling and the existing rotation and joint limits.
+- Derived arm velocity commands from final position-command differences using
+  the unclamped monotonic control interval; only smoother integration retains
+  the `1–5 ms` interval clamp.
+- Rejected non-finite joint commands and invalid initial arm positions instead
+  of converting them into limit targets, allowing `1e-4 rad` startup rounding
+  tolerance. Non-finite entry holds are not published.
 - Changed the `0.5 rad` IK continuity threshold from whole-candidate rejection
   to a per-joint, per-solve raw-target advance limit so fast valid solutions
   continue through the smoother without resetting it.

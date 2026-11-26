@@ -5,6 +5,8 @@
 
 Real-robot teleoperation is supported only on the robot Orin at
 `10.21.33.106`. Robotics Service and `state_machine` both run on that device.
+Pico can connect to the Orin over **WiFi** or a **USB cable**; both modes share
+the build, service startup, and teleoperation steps below.
 
 > [!WARNING]
 >
@@ -69,72 +71,79 @@ under `/opt/apps`:
 The actual path depends on the installation package or robot deployment
 environment. Run only one Robotics Service instance on an Orin.
 
-### 2.3 Connect the Robot Orin to the Required WiFi
+### 2.3 Choose the Pico Connection
 
-Continue in the current SSH terminal. Do not disconnect the Ethernet cable
-between the local development computer and the robot or close the current SSH
-session while configuring WiFi. First confirm through the wired connection
-that WiFi has obtained an IP address.
+Choose one mode below for the Pico-to-Orin link. The local development
+computer still uses the Ethernet/SSH connection from Section 1 to access Orin.
 
-1. List the Orin network devices and identify the wireless interface whose
-   `TYPE` is `wifi`:
+| Mode | Setup |
+| --- | --- |
+| Wireless WiFi | Follow [Section 2.3.1](#231-wireless-wifi-connection) to connect Pico and Orin to the same WiFi. |
+| Wired USB | Follow [Section 2.3.2](#232-wired-usb-connection) to connect them with a Type-C data cable; shared WiFi is not required for this link. |
 
-   ```bash
-   nmcli device status
-   ```
+#### 2.3.1 Wireless WiFi Connection
 
-   The commands below use `<wifi-interface>` for this name, for example
-   `wlan0` or `wlP1p1s0`.
-
-2. Enable WiFi and scan for networks visible to that interface:
-
-   ```bash
-   sudo nmcli radio wifi on
-   nmcli device wifi list ifname <wifi-interface>
-   ```
-
-3. Connect to the target WiFi. `--ask` prompts for the password in the terminal
-   so that it does not appear directly in the command or shell history:
-
-   ```bash
-   sudo nmcli --ask device wifi connect "<wifi-ssid>" \
-     ifname <wifi-interface> name "pico-teleop-wifi"
-   ```
-
-   For a hidden SSID, use:
-
-   ```bash
-   sudo nmcli --ask device wifi connect "<wifi-ssid>" \
-     ifname <wifi-interface> name "pico-teleop-wifi" hidden yes
-   ```
-
-4. Check the connection and query the IPv4 address assigned to the Orin on
-   this WiFi:
-
-   ```bash
-   nmcli connection show --active
-   nmcli -g IP4.ADDRESS device show <wifi-interface>
-   ```
-
-   The output is normally `<Orin-WiFi-IP>/<prefix-length>`, for example
-   `192.168.1.20/24`. `<Orin-WiFi-IP>` is the receiver address to enter later
-   in the Pico XRoboToolkit application. `10.21.33.106` is the wired address
-   currently used to access the Orin. Do not treat it as the WiFi IP unless the
-   on-site network has explicitly assigned the same address.
-
-5. Connect the Pico to the same WiFi. The WiFi must allow devices on the same
-   LAN to communicate and must not enable AP isolation (client isolation).
-
-NetworkManager saves this connection as `pico-teleop-wifi`. To reconnect it
-manually later, run:
+After logging in to the robot Orin, check the network devices in the current
+SSH terminal:
 
 ```bash
-sudo nmcli connection up "pico-teleop-wifi"
+# Check STATE and CONNECTION for wlan0
+nmcli device status
 ```
 
-If `nmcli` is unavailable, no wireless interface appears, or the device state
-is `unmanaged`, do not directly modify the robot network configuration. Follow
-the network procedure supplied with the robot or contact technical support.
+If `wlan0` is already `connected` to the target WiFi, skip the connection
+commands below and go directly to the IP query.
+
+If it is not connected, run:
+
+```bash
+# Enable WiFi
+sudo nmcli radio wifi on
+
+# Scan nearby networks and find the target name in the SSID column
+nmcli device wifi list
+
+# Replace <wifi_ssid> with the actual SSID and enter the password when prompted
+sudo nmcli --ask device wifi connect "<wifi_ssid>"
+
+# Confirm the connection to the target WiFi
+nmcli connection show --active
+```
+
+Repeated SSIDs in the list represent multiple access points. Connect by SSID;
+there is no need to specify a BSSID.
+
+Once connected, query the Orin's WiFi IP:
+
+```bash
+nmcli -g IP4.ADDRESS device show wlan0
+```
+
+If the wireless interface is not named `wlan0`, replace it in the query with
+the actual name shown by `nmcli device status`. For output such as
+`192.168.1.20/24`, the address before the slash is `<Orin-WiFi-IP>`.
+
+Connect Pico to the same WiFi and use `<Orin-WiFi-IP>` as its receiver address,
+rather than the wired login address `10.21.33.106`. The WiFi must allow devices
+to communicate with each other; disable client isolation (AP isolation).
+
+#### 2.3.2 Wired USB Connection
+
+Use a **Type-C to Type-C data cable** to connect Pico's Type-C port to the
+**Type-C port on the robot's back**. Keep Developer Mode and USB debugging
+enabled on Pico.
+
+Run the following in an SSH terminal on the **robot Orin**, not on the local
+development computer. If Orin does not have `adb`, first run
+`sudo apt install android-tools-adb`, then check the device:
+
+```bash
+adb devices
+```
+
+Confirm that Pico is listed as `device`. If it is `unauthorized`, approve USB
+debugging in the headset. Continue with the shared steps below; Section 7 sets
+up USB port forwarding immediately before starting the service.
 
 ## 3. Download the Project and Load the Environment
 
@@ -219,13 +228,23 @@ deep-robotics-teleoperate/
 
 ## 5. Build for the Real Robot
 
-Run the following commands from the project root:
+Use a terminal without an active Conda environment and load the ROS 2 and
+message-interface environments described above. If needed, run
+`conda deactivate` until Conda is inactive before loading them. Run the
+following commands from the project root:
 
 ```bash
 colcon build --packages-up-to dr02_tele \
-  --cmake-args -DBUILD_PLATFORM=arm -DBUILD_SIM=OFF
+  --cmake-args -DBUILD_PLATFORM=arm -DBUILD_SIM=OFF \
+  -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
 ```
+
+If a previous CMake configuration selected Conda libraries, add
+`--cmake-clean-cache` before `--cmake-args` in the command above. Mixing Conda
+and system OpenSSL libraries can cause undefined symbols at link time. The
+unused `BUILD_PLATFORM` and `BUILD_SIM` warnings from `deep_robotics_common`
+are harmless; these options are consumed by `dr02_tele`.
 
 > [!WARNING]
 >
@@ -247,33 +266,59 @@ Before using the Zhixing grippers, start `zx_gripper_sdk` on RK.
 
 ## 7. Start Robotics Service
 
-After compilation, open a new terminal (Terminal 1), connect to
-`10.21.33.106`, and run the following commands on the robot Orin:
+After compilation, open Terminal 1 and log in to the robot Orin:
 
 ```bash
 ssh user@10.21.33.106
+```
+
+**Wired USB only:** confirm that `adb devices` lists Pico as `device`, then
+set up port forwarding on Orin. Repeat this command after reconnecting the
+cable or restarting either device:
+
+```bash
+adb reverse tcp:63901 tcp:63901
+```
+
+**For both modes**, start the service:
+
+```bash
 cd /opt/apps/roboticsservice/
 ./runService.sh
 ```
 
-Keep this terminal and Robotics Service running.
+Keep this terminal and Robotics Service running. In USB mode, also keep the
+USB data cable connected.
 
 ## 8. Configure Pico
 
-On the Pico:
+Start Robotics Service on the robot Orin as described in Section 7, then
+follow the steps for your connection mode.
 
-1. Open **Settings** → **WiFi** and connect the Pico to the same WiFi as the
-   robot Orin.
+### 8.1 Wireless WiFi
+
+1. Open **Settings** → **WiFi** and connect Pico to the same WiFi as the robot
+   Orin.
 2. Open **Library** → **Unknown Sources** → **XRoboToolkit**.
 3. Select **Enter**.
-4. Set the receiver address to the `<Orin-WiFi-IP>` queried earlier. This is
-   the address on the current WiFi of the robot Orin running Robotics Service
-   and `state_machine`.
-5. After the connection succeeds, enable **Controller** and **Send**. Also
-   enable **Head** for normal teleoperation. If `state_machine` is started with
-   `--record`, keeping **Head** disabled is recommended because the current
-   dataset contract does not record waist-joint data.
-6. Keep the headset awake so that sleep does not interrupt data transmission.
+4. Set the receiver address to `<Orin-WiFi-IP>` from Section 2.3.1 and connect.
+5. After connecting, enable **Controller** and **Send**. Enable **Head** only
+   when waist control is needed; otherwise leave it unchecked. Keep the headset awake.
+
+### 8.2 Wired USB
+
+Keep the Type-C data cable connected between Pico and the robot's rear Type-C
+port. Confirm that `adb reverse tcp:63901 tcp:63901` has been run on Orin as
+described in Section 7.
+
+1. Open **Library** → **Unknown Sources** → **XRoboToolkit**.
+2. Select **Reconnect** directly. No receiver address is needed; confirm that
+   **working** appears in green.
+3. Enable **Controller** and **Send**. Enable **Head** only when waist control
+   is needed; otherwise leave it unchecked. Keep the headset awake.
+
+If you are using the `--record` option, it is recommended to disable **Head**.
+Keep **Controller** and **Send** enabled.
 
 ## 9. Start the State Machine
 
@@ -349,8 +394,10 @@ emergency stop.
 | Continues to display `wait data update` | `/JOINTS_DATA`, the ROS 2 environment, `drdds`, and DDS configuration |
 | PXREA initialization or loading fails | Whether Robotics Service is running and whether ARM dependencies are in use |
 | URDF cannot be found | `deep_robotics_model/` in the project root or the `DR02_PRO_TELEOP_URDF` path |
-| No Pico data | Whether Pico and Orin are on the same WiFi, the receiver address is `<Orin-WiFi-IP>`, all three transmission switches are enabled, and the headset is awake |
-| Data arrives but the arms do not move | Whether the state is `Teleoperation`, the trigger reaches its threshold, and the trigger must first be released |
+| No Pico data over WiFi | Whether Pico and Orin share WiFi, the receiver address is `<Orin-WiFi-IP>`, transmission switches are enabled, and the headset is awake |
+| No Pico data over USB | Cable connected to the robot's rear Type-C port, Pico listed as `device` by `adb devices` on Orin, port 63901 in `adb reverse --list`, Robotics Service running, green **working** status after **Reconnect**, and transmission switches enabled |
+| Data arrives but the arms do not move | `Teleoperation` state, trigger/stale-recovery state, finite joint feedback, and initial arm positions within the loaded URDF limits |
+| Repeated `reject IK candidate` | Check the logged residuals against the position/orientation thresholds; see [IK diagnostics](STATE_MACHINE.md#9-runtime-diagnostics-and-troubleshooting) |
 
 > [!WARNING]
 >

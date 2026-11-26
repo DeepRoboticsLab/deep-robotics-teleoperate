@@ -93,6 +93,12 @@ On entry to `Teleoperation`, the state machine first reads current 31-joint
 feedback, initializes IK, targets, and filters, and then starts PXREA. The robot
 therefore does not jump directly toward an absolute Pico pose.
 
+Target initialization requires finite feedback for all 31 joints and arm
+positions inside the loaded URDF limits, allowing only `1e-4 rad` rounding
+tolerance. Invalid seeds are rejected rather than clipped into motion targets;
+initialization retries when valid feedback arrives. A finite entry pose is
+held, and a non-finite hold pose is not published.
+
 ### Controllers Drive the Arms and Optional Grippers
 
 - When a trigger reaches `0.5`, the current controller pose and corresponding
@@ -103,9 +109,11 @@ therefore does not jump directly toward an absolute Pico pose.
   current robot command pose, avoiding a jump to an old target.
 - With `--ee zhixing`, left and right grip values control their corresponding
   grippers independently of the triggers. The default mode ignores grip.
-- When recording is enabled, the left primary button starts or finishes an
+- With `--record`, the left primary button starts or finishes an
   episode, and the left secondary button deletes the most recent completed
-  episode. Joystick-axis and joystick-click data are not currently bound.
+  episode. These buttons have no action without recording enabled.
+- Right primary/secondary states are read but have no bound function. Left and
+  right joystick axes and clicks are neither parsed nor bound.
 - The triggers operate independently, but both arm targets are solved together
   in one IK problem.
 
@@ -116,7 +124,7 @@ Controller mapping parameters:
 | Trigger threshold | `0.5` |
 | Translation deadband | `0.015 m` |
 | Translation scale | `1.2` |
-| Maximum translation from anchor | `0.5 m` |
+| Maximum translation from anchor | No fixed magnitude cap; reachability and IK residual checks still apply |
 | Rotation deadband | `0.035 rad` |
 | Maximum rotation from anchor | `1.45 rad` |
 | Grip input range | `[0, 1]` |
@@ -156,6 +164,9 @@ per-feedback slew limit.
 
 The state machine uses the monotonic local receive time of Pico data to judge
 freshness. This value is not a network-latency measurement.
+Control-cycle and stale-data timing use local `steady_clock` differences, so
+an incorrect calendar date, including 1970, does not affect these calculations.
+Recording timestamps use a separate wall clock; see [Recording](RECORDING.md).
 
 - No valid packet, or no update for more than `200 ms`, enters soft stale hold.
 - Soft stale hold freezes the last target actually sent to the robot rather
@@ -181,11 +192,14 @@ Each fresh Pico state triggers at most one dual-arm solve with up to 50 internal
 iterations. Higher-rate joint feedback continues filtering and publishing the
 cached result. Protection and shaping occur in this order:
 
-1. Limit controller translation and rotation relative to the anchor.
+1. Apply a deadband and scale to translation relative to the anchor, with no
+   fixed translation magnitude cap. Rotation retains its deadband and
+   `1.45 rad` magnitude cap.
 2. Solve both position and orientation targets, adding an outward soft cost
    with weight `5.0` when an elbow enters the torso cylinder of radius `0.25 m`.
    Joint-posture and seed-continuity regularization weights are `0.002` and
-   `0.02`, respectively.
+   `0.2`, respectively; seed continuity is multiplied by five for both elbow
+   joints. Continuity is a soft cost, not a hard bound on joint changes.
 3. Clamp each internal candidate to the URDF joint-position limits. Accept a
    step only when both the total Cartesian task error and the full objective do
    not increase; otherwise perform up to six backtracking halvings and increase
@@ -202,24 +216,34 @@ cached result. Protection and shaping occur in this order:
    fast motion cannot lock the target at an old command.
 7. Pass the 14 arm targets through a four-frame weighted average
    `{0.1, 0.2, 0.3, 0.4}` and a critically damped second-order smoother with
-   `omega = 30`. Publish both its smoothed arm positions and velocities.
-8. Apply the following software limits to waist and arm targets.
-9. Limit final output relative to the previous command actually sent to
-   `0.006 rad` per feedback frame.
+   `omega = 30`. Only the smoother integration interval is clamped to `1–5 ms`.
+8. Apply independent software limits to waist targets and the URDF limits
+   read by the same IK model to arm targets.
+9. Limit output relative to the previous issued command to `0.006 rad` per
+   feedback frame, then recheck arm output against URDF limits, including
+   hold/recovery paths. Reject non-finite commands and restore the previous
+   valid command.
+10. Compute arm velocity from final position commands as
+    `(q_cmd - q_cmd_prev) / dt`, using the measured, unclamped monotonic interval
+    between control updates instead of the smoother's internal velocity.
 
-| Index | Joint | Software range (rad) |
+Arm ranges below come from the repository's default `DR02-pro.urdf`. With
+`DR02_PRO_TELEOP_URDF`, both IK and arm output use the selected file's ranges.
+Waist joints retain the independent software ranges shown below.
+
+| Index | Joint | Output range (rad) |
 | ---: | --- | --- |
 | `0` | waist z | `[-0.6, 0.6]` |
 | `1` | waist x | `[-0.4, 0.4]` |
 | `2` | waist y | `[-0.4, 0.4]` |
-| `3` / `10` | left / right shoulder y | `[-1.2, 1.4]` |
-| `4` | left shoulder x | `[-0.7, 1.8]` |
-| `11` | right shoulder x | `[-1.8, 0.7]` |
-| `5` / `12` | left / right shoulder z | `[-1.6, 1.6]` |
-| `6` / `13` | left / right elbow | `[-0.2, 1.8]` |
-| `7` / `14` | left / right wrist z | `[-2.6, 2.6]` |
-| `8` / `15` | left / right wrist y | `[-1.45, 1.45]` |
-| `9` / `16` | left / right wrist x | `[-1.45, 1.45]` |
+| `3` / `10` | left / right shoulder y | `[-3.8397, 1.5708]` |
+| `4` | left shoulder x | `[-0.349066, 3.49066]` |
+| `11` | right shoulder x | `[-3.49066, 0.349066]` |
+| `5` / `12` | left / right shoulder z | `[-2.9671, 2.9671]` |
+| `6` / `13` | left / right elbow | `[-0.767945, 1.74533]` |
+| `7` / `14` | left / right wrist z | `[-2.9671, 2.9671]` |
+| `8` / `15` | left / right wrist y | `[-1.5708, 1.5708]` |
+| `9` / `16` | left / right wrist x | `[-1.5708, 1.5708]` |
 
 The elbow-cylinder cost is a soft constraint, not mesh collision detection. It
 does not detect arm-to-arm contact or protect against the environment or a
@@ -265,12 +289,12 @@ control_ms(avg/max)=.../... trigger(L/R)=.../... stale=...
 
 | Field or symptom | Meaning and first check |
 | --- | --- |
-| `pico_age_ms` | Local time of the last valid Pico packet; above 200 means stale protection. |
+| `pico_age_ms` | Milliseconds since the last valid Pico packet arrived; `-1` means invalid receive time, and above 200 means stale protection. |
 | `packets` | Valid packets in the last second; zero means check Pico **Send** and Robotics Service. |
 | `parse_fail` | JSON parse failures; a growing value suggests a sender format or version mismatch. |
 | `feedback_hz` | Actual joint-feedback/control rate; low values indicate `/JOINTS_DATA` or DDS problems. |
 | `ik_hz` | Actual IK solve rate. IK runs once per fresh Pico packet instead of repeating at the higher joint-feedback rate. |
-| `ik_reject` | IK candidates rejected in the last second and in total; sustained growth indicates an unreachable target, a nearby singularity, or an input jump. |
+| `ik_reject` | IK candidates rejected in the last second and in total; sustained growth calls for checking reachability, singularities, input jumps, and the tracking tradeoff from continuity regularization. |
 | `ik_limit` | Valid IK targets whose per-joint advance was clipped to `0.5 rad`; growth during fast motion is expected and does not freeze the smoother. |
 | `ik_ms(avg/max)` | Average/maximum IK time; spikes suggest unreachable targets, URDF issues, or host load. |
 | `control_ms(avg/max)` | Complete Teleoperation control and publish time. |
@@ -290,6 +314,13 @@ Common startup messages:
 | `limit IK target` | A valid IK solution exceeded the per-solve target-advance limit and was clipped instead of rejected. |
 | `Pico data stale` | Pico data has not updated for 200 ms; output is frozen while 3 fresh packets are awaited. |
 | `Pico data hard stale` | Pico data has not updated for 1000 ms; triggers must be released after recovery. |
+
+In `reject IK candidate`, `pos_err` and `rot_err` are checked against `0.05 m`
+and `15 deg`. Exceeding either threshold on either side holds both arms;
+decreasing task cost does not override a residual failure. Neither
+`converged=0` nor `max_joint_delta` directly rejects a candidate: the per-joint
+`0.5 rad` advance limit is applied only after acceptance. This advance limit
+is separate from the removed `0.5 m` translation magnitude cap.
 
 ## 10. Parameter Locations
 
