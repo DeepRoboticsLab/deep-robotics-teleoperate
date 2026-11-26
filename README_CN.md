@@ -15,8 +15,6 @@
 DEEPRobotics Teleoperate 是面向 DR02 Pro 人形机器人的 ROS 2 遥操作项目。项目将 PICO
 头显与手柄输入转换为腰部和双臂指令，可用于 DR02 Pro 实机或 MuJoCo 仿真。受支持的末端
 执行器通过运行参数按需启用；真机数据采集可记录纯双臂或双臂加末端执行器数据。
-真机支持 Pico 通过 WiFi 无线或 Type-C 数据线连接机器人 Orin，详见
-[真机遥操作指南](src/dr02_pro/docs/REAL_ROBOT_CN.md)。
 
 ## 系统概览
 
